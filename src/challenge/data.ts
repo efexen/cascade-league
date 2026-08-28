@@ -11,6 +11,7 @@ import {
   UtcTimestampSchema,
   uniqueValues,
 } from "../schemas/index.js";
+import { JudgmentScoresSchema } from "../schemas/index.js";
 
 const TextSchema = (maximum = 4096) =>
   z
@@ -18,6 +19,23 @@ const TextSchema = (maximum = 4096) =>
     .min(1)
     .max(maximum)
     .refine((value) => value.trim().length > 0, "must not be blank");
+
+const DisplayAggregateLabelSchema = z.union([
+  z.literal("—"),
+  z.string().regex(/^\d+\.\d{2}$/u, "aggregate display values must use two decimals"),
+]);
+
+export const DimensionMeanLabelsSchema = z
+  .object({
+    hierarchyAndReadability: z.string().regex(/^\d+\.\d{2}$/u),
+    composition: z.string().regex(/^\d+\.\d{2}$/u),
+    typography: z.string().regex(/^\d+\.\d{2}$/u),
+    colourAndVisualSystem: z.string().regex(/^\d+\.\d{2}$/u),
+    coherenceAndCraft: z.string().regex(/^\d+\.\d{2}$/u),
+    originalityAndMemorability: z.string().regex(/^\d+\.\d{2}$/u),
+    constraintAndCssCraft: z.string().regex(/^\d+\.\d{2}$/u),
+  })
+  .strict();
 
 export const SeedEntrySchema = z
   .object({
@@ -56,6 +74,11 @@ const JudgeNoteSchema = z
     totalScore: z.number().int().min(0).max(100),
     originalityScore: z.number().int().min(0).max(20),
     critique: TextSchema(500),
+    strongestQuality: TextSchema(500).optional(),
+    primaryWeakness: TextSchema(500).optional(),
+    nextMove: TextSchema(500).optional(),
+    scores: JudgmentScoresSchema.optional(),
+    candidateRank: z.number().int().positive().nullable().optional(),
   })
   .strict();
 
@@ -89,8 +112,11 @@ const PageEntrySchema = z
     statusLabel: TextSchema(100),
     alt: TextSchema(300),
     screenshotPath: RelativePosixPathSchema,
-    combinedScoreLabel: TextSchema(50),
-    originalityScoreLabel: TextSchema(50),
+    combinedScoreLabel: DisplayAggregateLabelSchema,
+    originalityScoreLabel: DisplayAggregateLabelSchema,
+    completedJudgeCount: z.number().int().nonnegative(),
+    expectedJudgeCount: z.number().int().nonnegative(),
+    dimensionMeanLabels: DimensionMeanLabelsSchema.nullable().optional(),
     judgeScores: z.array(JudgeNoteSchema),
     awards: z.array(
       z
@@ -132,3 +158,4 @@ export type SeedGeneration = z.infer<typeof SeedGenerationSchema>;
 export type ChallengePageData = z.infer<typeof ChallengePageDataSchema>;
 export type PageEntry = ChallengePageData["entries"][number];
 export type PageAward = ChallengePageData["awards"][number];
+export type DimensionMeanLabels = z.infer<typeof DimensionMeanLabelsSchema>;

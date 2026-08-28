@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("repository bootstrap", () => {
-  it("pins Node 24 and exposes the required package commands", () => {
+  it("keeps Node 24 as the reference and supports Node 22+", () => {
     const packageJson = JSON.parse(
       readFileSync(join(repositoryRoot, "package.json"), "utf8"),
     ) as {
@@ -17,7 +17,7 @@ describe("repository bootstrap", () => {
     expect(readFileSync(join(repositoryRoot, ".nvmrc"), "utf8").trim()).toMatch(
       /^24(?:\.\d+\.\d+)?$/,
     );
-    expect(packageJson.engines?.node).toBe("24.x");
+    expect(packageJson.engines?.node).toBe(">=22");
     expect(packageJson.scripts).toMatchObject({
       garden: expect.any(String),
       test: expect.any(String),

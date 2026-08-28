@@ -61,6 +61,10 @@ async function resolveRequestPath(
 export async function startLoopbackStaticServer(
   options: LoopbackStaticServerOptions,
 ): Promise<LoopbackStaticServer> {
+  const rootStatus = await lstat(options.rootPath);
+  if (rootStatus.isSymbolicLink() || !rootStatus.isDirectory()) {
+    throw new Error("static server root must be a real directory");
+  }
   const rootPath = await realpath(options.rootPath);
   const entryFile = options.entryFile ?? "challenge.html";
   const requests: StaticServerRequest[] = [];

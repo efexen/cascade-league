@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { ChallengeConfigSchema } from "./config.js";
+
 import {
   AnonymousCandidateIdSchema,
   ContestantIdSchema,
@@ -116,6 +118,74 @@ export const SnapshotSchema = StrictObject({
   assetHashes: z.record(RelativePosixPathSchema, Sha256Schema),
 });
 
+const ArchivedSeedEntrySchema = StrictObject({
+  id: z
+    .string()
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "must be a lowercase hyphenated slug"),
+  screenshotPath: RelativePosixPathSchema.refine(
+    (value) => value.startsWith("thumbnails/") && value.endsWith(".png"),
+    "seed screenshots must be generation challenge thumbnails",
+  ),
+  alt: Text(300),
+});
+
+const ArchivedSeedDataSchema = StrictObject({
+  schemaVersion: SchemaVersionSchema,
+  seasonId: SeasonIdSchema,
+  generationId: z.null(),
+  generatedAt: UtcTimestampSchema,
+  entries: z
+    .array(ArchivedSeedEntrySchema)
+    .length(6)
+    .superRefine((entries, context) => {
+      const ids = entries.map((entry) => entry.id);
+      const paths = entries.map((entry) => entry.screenshotPath);
+      if (!uniqueValues(ids) || !uniqueValues(paths)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "archived seed entry IDs and paths must be unique",
+        });
+      }
+    }),
+});
+
+export const GalleryStaticCopySchema = StrictObject({
+  descriptor: Text(200),
+  shortDescription: Text(500),
+  headline: Text(300),
+  introduction: Text(1000),
+  centralQuestion: Text(500),
+  rules: z.array(Text(300)).length(5),
+  method: Text(1000),
+  statusLabels: StrictObject({
+    seed: Text(100),
+    valid: Text(100),
+    invalid: Text(100),
+    timeout: Text(100),
+    render_failed: Text(100),
+    judge_incomplete: Text(100),
+    execution_failed: Text(100),
+  }),
+  seedEntry: StrictObject({
+    displayName: Text(200),
+    harnessName: Text(200),
+    modelName: Text(200),
+    statusLabel: Text(100),
+  }),
+});
+
+export const GallerySourceArchiveSchema = StrictObject({
+  schemaVersion: SchemaVersionSchema,
+  sourceTemplate: RelativePosixPathSchema,
+  challengeConfig: ChallengeConfigSchema,
+  template: Text(4 * 1024 * 1024),
+  staticCopy: GalleryStaticCopySchema,
+  seed: ArchivedSeedDataSchema,
+});
+
+export type GalleryStaticCopy = z.infer<typeof GalleryStaticCopySchema>;
+export type GallerySourceArchive = z.infer<typeof GallerySourceArchiveSchema>;
+
 export const IdentitySchema = StrictObject({
   schemaVersion: SchemaVersionSchema,
   contestantId: ContestantIdSchema,
@@ -129,6 +199,7 @@ export const IdentitySchema = StrictObject({
     provider: Text(200),
     name: Text(200),
     configuredVersion: Text(200),
+    family: Text(200).optional(),
     reasoningEffort: ReasoningEffortSchema.optional(),
   }),
 });
@@ -176,6 +247,58 @@ export const RunSchema = StrictObject({
   stdoutLog: RelativePosixPathSchema,
   stderrLog: RelativePosixPathSchema,
   error: z.string().max(4000).nullable(),
+});
+
+export const TaskRoleSchema = z.enum(["contestant", "render", "judge", "awards"]);
+
+export const TaskStateStatusSchema = z.enum([
+  "pending",
+  "running",
+  "succeeded",
+  "failed",
+  "timeout",
+  "missing_submission",
+  "invalid",
+  "uncertain",
+]);
+
+export const TaskStateSchema = StrictObject({
+  schemaVersion: SchemaVersionSchema,
+  taskId: TaskIdSchema,
+  role: TaskRoleSchema,
+  targetId: Text(200),
+  status: TaskStateStatusSchema,
+  startedAt: OptionalTimestampSchema,
+  completedAt: OptionalTimestampSchema,
+  attemptCount: NonNegativeIntegerSchema,
+  requestAccepted: z.boolean().nullable(),
+  error: z.string().max(4000).nullable(),
+}).superRefine((task, context) => {
+  if (task.status === "running" && task.completedAt !== null) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["completedAt"],
+      message: "running tasks must not have completedAt",
+    });
+  }
+  if (task.status !== "pending" && task.startedAt === null) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["startedAt"],
+      message: "started tasks must record startedAt",
+    });
+  }
+  if (
+    task.status !== "pending" &&
+    task.status !== "running" &&
+    task.completedAt === null
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["completedAt"],
+      message: "terminal tasks must record completedAt",
+    });
+  }
 });
 
 export const CheckStatusSchema = z.enum(["passed", "warning", "failed", "not_run"]);
@@ -441,12 +564,36 @@ const LeaderboardJudgeScoreSchema = StrictObject({
   totalScore: ScoreSchema(100),
   originalityScore: ScoreSchema(20),
   critique: Text(500),
+  strongestQuality: Text(500).optional(),
+  primaryWeakness: Text(500).optional(),
+  nextMove: Text(500).optional(),
+  scores: JudgmentScoresSchema.optional(),
+  candidateRank: z.number().int().positive().nullable().optional(),
+  sameProvider: z.boolean().nullable().optional(),
+  sameModelFamily: z.boolean().nullable().optional(),
 });
 
 const LeaderboardAwardSchema = StrictObject({
   judgeId: JudgeIdSchema,
   label: Text(50),
   rationale: Text(240),
+});
+
+export const LeaderboardDimensionMeansSchema = StrictObject({
+  hierarchyAndReadability: z.number().finite().min(0).max(15),
+  composition: z.number().finite().min(0).max(15),
+  typography: z.number().finite().min(0).max(15),
+  colourAndVisualSystem: z.number().finite().min(0).max(10),
+  coherenceAndCraft: z.number().finite().min(0).max(15),
+  originalityAndMemorability: z.number().finite().min(0).max(20),
+  constraintAndCssCraft: z.number().finite().min(0).max(10),
+});
+
+const SelfFamilyMetadataSchema = StrictObject({
+  providerMatches: NonNegativeIntegerSchema,
+  providerComparisons: NonNegativeIntegerSchema,
+  modelFamilyMatches: NonNegativeIntegerSchema,
+  modelFamilyComparisons: NonNegativeIntegerSchema,
 });
 
 const LeaderboardEntrySchema = StrictObject({
@@ -460,9 +607,24 @@ const LeaderboardEntrySchema = StrictObject({
   combinedScore: z.number().finite().min(0).max(100).nullable(),
   medianScore: z.number().finite().min(0).max(100).nullable(),
   originalityScore: z.number().finite().min(0).max(20).nullable(),
+  meanHierarchyAndReadability: z.number().finite().min(0).max(15).nullable().optional(),
+  minimumScore: z.number().finite().min(0).max(100).nullable().optional(),
+  maximumScore: z.number().finite().min(0).max(100).nullable().optional(),
+  scoreRange: z.number().finite().min(0).max(100).nullable().optional(),
+  standardDeviation: z.number().finite().min(0).max(100).nullable().optional(),
+  dimensionMeans: LeaderboardDimensionMeansSchema.nullable().optional(),
   completedJudgeCount: NonNegativeIntegerSchema,
   expectedJudgeCount: NonNegativeIntegerSchema,
   judgeScores: z.array(LeaderboardJudgeScoreSchema),
+  judgeRanks: z
+    .array(
+      StrictObject({
+        judgeId: JudgeIdSchema,
+        rank: z.number().int().positive(),
+      }),
+    )
+    .optional(),
+  selfFamily: SelfFamilyMetadataSchema.optional(),
   awards: z.array(LeaderboardAwardSchema),
   failure: z.string().max(4000).nullable(),
 }).superRefine((entry, context) => {
@@ -575,6 +737,7 @@ export type Manifest = z.infer<typeof ManifestSchema>;
 export type Snapshot = z.infer<typeof SnapshotSchema>;
 export type Identity = z.infer<typeof IdentitySchema>;
 export type Run = z.infer<typeof RunSchema>;
+export type TaskState = z.infer<typeof TaskStateSchema>;
 export type Validation = z.infer<typeof ValidationSchema>;
 export type ContactSheetOrder = z.infer<typeof ContactSheetOrderSchema>;
 export type JudgeAssessmentOrder = z.infer<typeof JudgeAssessmentOrderSchema>;

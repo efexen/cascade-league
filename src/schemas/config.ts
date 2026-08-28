@@ -148,6 +148,7 @@ const ModelSchema = z
     provider: NonEmptyTextSchema(200),
     name: NonEmptyTextSchema(200),
     version: NonEmptyTextSchema(200),
+    family: NonEmptyTextSchema(200).optional(),
     reasoningEffort: ReasoningEffortSchema.optional(),
   })
   .strict();

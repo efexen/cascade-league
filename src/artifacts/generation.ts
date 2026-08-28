@@ -24,6 +24,7 @@ import sharp from "sharp";
 import {
   buildPreviousChallengePage,
   buildSeedChallengePage,
+  GALLERY_SOURCE_ARCHIVE_FILE,
   loadSeasonDefinition,
   PREVIOUS_GENERATION_THUMBNAIL_SIZE,
   type ChallengePage,
@@ -32,6 +33,7 @@ import {
 import {
   AnonymousMapSchema,
   ContestantsConfigSchema,
+  GallerySourceArchiveSchema,
   GenerationIdSchema,
   IdentitySchema,
   JudgesConfigSchema,
@@ -139,14 +141,28 @@ interface SnapshotInputSource {
 }
 
 async function listFiles(directory: string, prefix = ""): Promise<string[]> {
+  const directoryStatus = await lstat(directory);
+  if (directoryStatus.isSymbolicLink() || !directoryStatus.isDirectory()) {
+    throw new Error(
+      `generation source directory must be a real directory: ${directory}`,
+    );
+  }
   const entries = await readdir(directory, { withFileTypes: true });
   const files: string[] = [];
   for (const entry of entries) {
     const relativePath = join(prefix, entry.name);
+    const sourcePath = join(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new Error(`generation source must not contain symlinks: ${relativePath}`);
+    }
     if (entry.isDirectory()) {
-      files.push(...(await listFiles(join(directory, entry.name), relativePath)));
+      files.push(...(await listFiles(sourcePath, relativePath)));
     } else if (entry.isFile()) {
       files.push(posixPath(relativePath));
+    } else {
+      throw new Error(
+        `generation source must contain regular files only: ${relativePath}`,
+      );
     }
   }
   return files.sort();
@@ -229,15 +245,26 @@ async function buildSnapshotInputHashes(input: {
 }
 
 async function copyDirectory(source: string, destination: string): Promise<void> {
+  const sourceStatus = await lstat(source);
+  if (sourceStatus.isSymbolicLink() || !sourceStatus.isDirectory()) {
+    throw new Error(`generation source directory must be a real directory: ${source}`);
+  }
   await mkdir(destination, { recursive: true });
   const entries = await readdir(source, { withFileTypes: true });
   for (const entry of entries) {
     const sourcePath = join(source, entry.name);
     const destinationPath = join(destination, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new Error(`generation source must not contain symlinks: ${entry.name}`);
+    }
     if (entry.isDirectory()) {
       await copyDirectory(sourcePath, destinationPath);
     } else if (entry.isFile()) {
       await copyFile(sourcePath, destinationPath);
+    } else {
+      throw new Error(
+        `generation source must contain regular files only: ${entry.name}`,
+      );
     }
   }
 }
@@ -446,7 +473,9 @@ async function copyContestantInputs(
   const contestantPath = join(generationPath, "contestants", contestant.id);
   const workspacePath = join(contestantPath, "workspace");
   await mkdir(workspacePath, { recursive: true });
-  for (const relativePath of challengeFiles.filter((file) => file !== "fallback.css")) {
+  for (const relativePath of challengeFiles.filter(
+    (file) => file !== "fallback.css" && file !== GALLERY_SOURCE_ARCHIVE_FILE,
+  )) {
     const sourcePath = join(generationPath, "challenge", relativePath);
     const destinationPath = join(workspacePath, relativePath);
     await mkdir(dirname(destinationPath), { recursive: true });
@@ -466,6 +495,9 @@ async function copyContestantInputs(
       provider: contestant.model.provider,
       name: contestant.model.name,
       configuredVersion: contestant.model.version,
+      ...(contestant.model.family === undefined
+        ? {}
+        : { family: contestant.model.family }),
       ...(contestant.model.reasoningEffort === undefined
         ? {}
         : { reasoningEffort: contestant.model.reasoningEffort }),
@@ -739,6 +771,22 @@ export async function createGeneration(
       await mkdir(dirname(destinationPath), { recursive: true });
       await writePreviousGenerationThumbnail(source.sourcePath, destinationPath);
     }
+
+    await writeJsonAtomically(
+      join(temporaryGenerationPath, "challenge", GALLERY_SOURCE_ARCHIVE_FILE),
+      GallerySourceArchiveSchema,
+      {
+        schemaVersion: 1,
+        sourceTemplate: repositoryRelativePath(
+          repositoryRoot,
+          join(seasonRoot, definition.config.template),
+        ),
+        challengeConfig: definition.config,
+        template: definition.template,
+        staticCopy: definition.staticCopy,
+        seed: definition.seed,
+      },
+    );
 
     const challengeFiles = await listFiles(join(temporaryGenerationPath, "challenge"));
     const assetHashes = Object.fromEntries(

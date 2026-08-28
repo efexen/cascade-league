@@ -8,6 +8,7 @@ import {
   ManifestSchema,
   RunSchema,
   SnapshotSchema,
+  TaskStateSchema,
   ValidationSchema,
   createGenerationAwardsSchema,
 } from "../../src/schemas/index.js";
@@ -49,6 +50,30 @@ const judgment = {
 } as const;
 
 describe("artifact schemas", () => {
+  it("accepts explicit resumable task states and terminal outcomes", () => {
+    const task = {
+      schemaVersion: 1,
+      taskId: "0001-contestant-candidate-k7m4",
+      role: "contestant",
+      targetId: candidateId,
+      status: "running",
+      startedAt: timestamp,
+      completedAt: null,
+      attemptCount: 1,
+      requestAccepted: null,
+      error: null,
+    } as const;
+    expect(TaskStateSchema.parse(task)).toEqual(task);
+    expect(
+      TaskStateSchema.parse({
+        ...task,
+        status: "uncertain",
+        completedAt: "2026-08-27T20:01:00.000Z",
+        error: "interrupted while the task was running",
+      }),
+    ).toBeTruthy();
+  });
+
   it("accepts the documented manifest, snapshot, identity, run, and validation shapes", () => {
     expect(
       ManifestSchema.parse({

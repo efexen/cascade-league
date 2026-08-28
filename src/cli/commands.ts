@@ -86,9 +86,17 @@ export async function verifyRepository(
   const issues: VerificationIssue[] = [];
   const root = join(repositoryRoot);
   const nodeMajor = Number.parseInt(process.versions.node.split(".")[0] ?? "0", 10);
-  if (nodeMajor !== 24) {
+  if (nodeMajor < 22) {
     issues.push(
-      issue("node_version", `Node 24.x is required; running ${process.version}`),
+      issue("node_version", `Node 22 or newer is required; running ${process.version}`),
+    );
+  } else if (nodeMajor !== 24) {
+    issues.push(
+      issue(
+        "node_version",
+        `Node 24.x is the reference runtime; compatible Node.js >=22 is supported (running ${process.version})`,
+        "warning",
+      ),
     );
   }
 

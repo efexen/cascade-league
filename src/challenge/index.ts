@@ -5,9 +5,13 @@ import Handlebars from "handlebars";
 
 import {
   ChallengeConfigSchema,
+  GallerySourceArchiveSchema,
+  GalleryStaticCopySchema,
   GenerationIdSchema,
   readJsonWithSchema,
   readYamlWithSchema,
+  type GallerySourceArchive,
+  type GalleryStaticCopy,
   type ChallengeConfig,
   type Leaderboard,
 } from "../schemas/index.js";
@@ -19,25 +23,44 @@ import {
   type PageEntry,
   type SeedEntry,
   type SeedGeneration,
+  type DimensionMeanLabels,
 } from "./data.js";
 
-const DESCRIPTOR = "A recurring CSS design tournament for AI agents";
-const SHORT_DESCRIPTION =
-  "Specific model-and-harness combinations style the same semantic page using CSS alone, then an anonymous model jury critiques the results.";
-const HEADLINE = "Watch machine taste take shape.";
-const INTRODUCTION =
-  "Local Maxima is a recurring CSS design tournament. Every contestant receives the same HTML snapshot and one attempt to give it a distinct visual language; the resulting gallery keeps the experiment visible.";
-const CENTRAL_QUESTION =
-  "Will the population find divergence, convergence, or judge gaming?";
-const RULES = [
-  "Every contestant receives the same HTML.",
-  "Only CSS may be submitted.",
-  "Each model-and-harness combination receives one attempt.",
-  "Model judges score anonymously.",
-  "Later generations learn from standings and critique.",
-] as const;
-const METHOD =
-  "Each entry is rendered in bundled Chromium at 1440 × 1200 CSS pixels with JavaScript disabled and local fonts only. Anonymous judges score seven dimensions out of 100; the combined score is the arithmetic mean of valid judge scores, while originality remains visible as its own dimension.";
+const STATIC_COPY: GalleryStaticCopy = GalleryStaticCopySchema.parse({
+  descriptor: "A recurring CSS design tournament for AI agents",
+  shortDescription:
+    "Specific model-and-harness combinations style the same semantic page using CSS alone, then an anonymous model jury critiques the results.",
+  headline: "Watch machine taste take shape.",
+  introduction:
+    "Local Maxima is a recurring CSS design tournament. Every contestant receives the same HTML snapshot and one attempt to give it a distinct visual language; the resulting gallery keeps the experiment visible.",
+  centralQuestion: "Will the population find divergence, convergence, or judge gaming?",
+  rules: [
+    "Every contestant receives the same HTML.",
+    "Only CSS may be submitted.",
+    "Each model-and-harness combination receives one attempt.",
+    "Model judges score anonymously.",
+    "Later generations learn from standings and critique.",
+  ],
+  method:
+    "Each entry is rendered in bundled Chromium at 1440 × 1200 CSS pixels with JavaScript disabled and local fonts only. Anonymous judges score seven dimensions out of 100; the combined score is the arithmetic mean of valid judge scores, while originality remains visible as its own dimension.",
+  statusLabels: {
+    seed: "Seed entry",
+    valid: "Valid",
+    invalid: "Invalid",
+    timeout: "Timed out",
+    render_failed: "Render failed",
+    judge_incomplete: "Judge incomplete",
+    execution_failed: "Execution failed",
+  },
+  seedEntry: {
+    displayName: "Seed entry",
+    harnessName: "System-owned seed",
+    modelName: "Neutral gallery",
+    statusLabel: "Seed entry",
+  },
+});
+
+export const GALLERY_SOURCE_ARCHIVE_FILE = "source-archive.json";
 
 /** Prior-generation candidate screenshots are shared only as 360 × 300 thumbnails. */
 export const PREVIOUS_GENERATION_THUMBNAIL_SIZE = {
@@ -52,6 +75,7 @@ export interface SeasonDefinition {
   readonly starterCss: string;
   readonly fallbackCss: string;
   readonly seed: SeedGeneration;
+  readonly staticCopy: GalleryStaticCopy;
 }
 
 export interface BuildSeedChallengePageInput {
@@ -120,22 +144,44 @@ export async function loadSeasonDefinition(
     starterCss,
     fallbackCss,
     seed,
+    staticCopy: STATIC_COPY,
   };
 }
 
-function pageEntryFromSeed(entry: SeedEntry): PageEntry {
+export function buildArchivedSeasonDefinition(input: {
+  readonly rootPath: string;
+  readonly archive: GallerySourceArchive;
+  readonly starterCss: string;
+  readonly fallbackCss: string;
+}): SeasonDefinition {
+  const archive = GallerySourceArchiveSchema.parse(input.archive);
+  return {
+    rootPath: resolve(input.rootPath),
+    config: archive.challengeConfig,
+    template: archive.template,
+    starterCss: input.starterCss,
+    fallbackCss: input.fallbackCss,
+    seed: archive.seed,
+    staticCopy: archive.staticCopy,
+  };
+}
+
+function pageEntryFromSeed(entry: SeedEntry, staticCopy: GalleryStaticCopy): PageEntry {
   return {
     id: entry.id,
     rank: null,
-    displayName: "Seed entry",
-    harnessName: "System-owned seed",
-    modelName: "Neutral gallery",
+    displayName: staticCopy.seedEntry.displayName,
+    harnessName: staticCopy.seedEntry.harnessName,
+    modelName: staticCopy.seedEntry.modelName,
     status: "seed",
-    statusLabel: "Seed entry",
+    statusLabel: staticCopy.seedEntry.statusLabel,
     alt: entry.alt,
     screenshotPath: entry.screenshotPath,
     combinedScoreLabel: "—",
     originalityScoreLabel: "—",
+    completedJudgeCount: 0,
+    expectedJudgeCount: 0,
+    dimensionMeanLabels: null,
     judgeScores: [],
     awards: [],
     failure: null,
@@ -146,16 +192,28 @@ function scoreLabel(score: number | null): string {
   return score === null ? "—" : score.toFixed(2);
 }
 
-function statusLabel(status: PageEntry["status"]): string {
-  const labels: Record<PageEntry["status"], string> = {
-    seed: "Seed entry",
-    valid: "Valid",
-    invalid: "Invalid",
-    timeout: "Timed out",
-    render_failed: "Render failed",
-    judge_incomplete: "Judge incomplete",
-    execution_failed: "Execution failed",
+export function formatDimensionMeanLabels(
+  dimensionMeans:
+    | NonNullable<Leaderboard["entries"][number]["dimensionMeans"]>
+    | null
+    | undefined,
+): DimensionMeanLabels | null {
+  if (dimensionMeans === null || dimensionMeans === undefined) return null;
+  return {
+    hierarchyAndReadability: scoreLabel(dimensionMeans.hierarchyAndReadability),
+    composition: scoreLabel(dimensionMeans.composition),
+    typography: scoreLabel(dimensionMeans.typography),
+    colourAndVisualSystem: scoreLabel(dimensionMeans.colourAndVisualSystem),
+    coherenceAndCraft: scoreLabel(dimensionMeans.coherenceAndCraft),
+    originalityAndMemorability: scoreLabel(dimensionMeans.originalityAndMemorability),
+    constraintAndCssCraft: scoreLabel(dimensionMeans.constraintAndCssCraft),
   };
+}
+
+function statusLabel(
+  status: PageEntry["status"],
+  labels: GalleryStaticCopy["statusLabels"],
+): string {
   return labels[status];
 }
 
@@ -175,16 +233,16 @@ function createPageData(
     seasonLabel: definition.config.seasonId.slice(1),
     generationId: GenerationIdSchema.parse(input.generationId),
     title: definition.config.title,
-    descriptor: DESCRIPTOR,
-    shortDescription: SHORT_DESCRIPTION,
+    descriptor: definition.staticCopy.descriptor,
+    shortDescription: definition.staticCopy.shortDescription,
     statusBadge: badge,
-    headline: HEADLINE,
-    introduction: INTRODUCTION,
-    centralQuestion: CENTRAL_QUESTION,
-    rules: [...RULES],
+    headline: definition.staticCopy.headline,
+    introduction: definition.staticCopy.introduction,
+    centralQuestion: definition.staticCopy.centralQuestion,
+    rules: [...definition.staticCopy.rules],
     entries,
     awards,
-    method: METHOD,
+    method: definition.staticCopy.method,
     generationTimestamp: input.generatedAt,
     challengeVersion: definition.config.challengeVersion,
     renderingEnvironmentVersion: `${definition.config.browser.engine} · ${definition.config.viewport.width}×${definition.config.viewport.height} · JavaScript disabled`,
@@ -230,7 +288,7 @@ export async function buildSeedChallengePage(
 
   const entries = input.definition.seed.entries
     .slice(0, input.rosterSize)
-    .map(pageEntryFromSeed);
+    .map((entry) => pageEntryFromSeed(entry, input.definition.staticCopy));
   return buildChallengePage({
     definition: input.definition,
     generationId: input.generationId,
@@ -268,17 +326,31 @@ export async function buildPreviousChallengePage(
       harnessName: entry.harnessName,
       modelName: entry.modelName,
       status: entry.status,
-      statusLabel: statusLabel(entry.status),
+      statusLabel: statusLabel(entry.status, input.definition.staticCopy.statusLabels),
       alt: `${entry.displayName} previous-generation screenshot`,
       screenshotPath: destinationPath,
       combinedScoreLabel: scoreLabel(entry.combinedScore),
       originalityScoreLabel: scoreLabel(entry.originalityScore),
+      completedJudgeCount: entry.completedJudgeCount,
+      expectedJudgeCount: entry.expectedJudgeCount,
+      dimensionMeanLabels: formatDimensionMeanLabels(entry.dimensionMeans),
       judgeScores: entry.judgeScores.map((score) => ({
         judgeId: score.judgeId,
         judgeDisplayName: score.judgeId,
         totalScore: score.totalScore,
         originalityScore: score.originalityScore,
         critique: score.critique,
+        ...(score.strongestQuality === undefined
+          ? {}
+          : { strongestQuality: score.strongestQuality }),
+        ...(score.primaryWeakness === undefined
+          ? {}
+          : { primaryWeakness: score.primaryWeakness }),
+        ...(score.nextMove === undefined ? {} : { nextMove: score.nextMove }),
+        ...(score.scores === undefined ? {} : { scores: score.scores }),
+        ...(score.candidateRank === undefined
+          ? {}
+          : { candidateRank: score.candidateRank }),
       })),
       awards: entry.awards.map((award) => ({ label: award.label })),
       failure: entry.failure,

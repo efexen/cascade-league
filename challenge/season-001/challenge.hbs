@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=1440, initial-scale=1">
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'"
+      content="default-src 'none'; script-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; media-src 'none'; worker-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'"
     >
     <title>{{title}} — {{descriptor}}</title>
     <link rel="stylesheet" href="{{stylesheetPath}}">
@@ -90,8 +90,23 @@
                   <dl class="entry-scores">
                     <div><dt>Combined</dt><dd>{{combinedScoreLabel}}</dd></div>
                     <div><dt>Originality</dt><dd>{{originalityScoreLabel}}</dd></div>
+                    <div><dt>Judges</dt><dd>{{completedJudgeCount}} / {{expectedJudgeCount}}</dd></div>
                     <div><dt>Status</dt><dd>{{statusLabel}}</dd></div>
                   </dl>
+                  {{#if dimensionMeanLabels}}
+                    <dl class="entry-scores entry-dimension-means">
+                      <div><dt>Hierarchy</dt><dd>{{dimensionMeanLabels.hierarchyAndReadability}}</dd></div>
+                      <div><dt>Composition</dt><dd>{{dimensionMeanLabels.composition}}</dd></div>
+                      <div><dt>Typography</dt><dd>{{dimensionMeanLabels.typography}}</dd></div>
+                      <div><dt>Colour</dt><dd>{{dimensionMeanLabels.colourAndVisualSystem}}</dd></div>
+                      <div><dt>Craft</dt><dd>{{dimensionMeanLabels.coherenceAndCraft}}</dd></div>
+                      <div><dt>Originality</dt><dd>{{dimensionMeanLabels.originalityAndMemorability}}</dd></div>
+                      <div><dt>CSS craft</dt><dd>{{dimensionMeanLabels.constraintAndCssCraft}}</dd></div>
+                    </dl>
+                  {{/if}}
+                  {{#if failure}}
+                    <p class="entry-failure">{{failure}}</p>
+                  {{/if}}
                   <ul class="entry-awards">
                     {{#each awards}}
                       <li class="entry-award">{{label}}</li>
@@ -160,6 +175,19 @@
                         {{totalScore}}
                         · Originality
                         {{originalityScore}}</p>
+                      {{#if scores}}
+                        <dl class="judge-dimension-scores">
+                          <div><dt>Hierarchy</dt><dd>{{scores.hierarchyAndReadability}}</dd></div>
+                          <div><dt>Composition</dt><dd>{{scores.composition}}</dd></div>
+                          <div><dt>Typography</dt><dd>{{scores.typography}}</dd></div>
+                          <div><dt>Colour</dt><dd>{{scores.colourAndVisualSystem}}</dd></div>
+                          <div><dt>Craft</dt><dd>{{scores.coherenceAndCraft}}</dd></div>
+                          <div><dt>CSS</dt><dd>{{scores.constraintAndCssCraft}}</dd></div>
+                        </dl>
+                      {{/if}}
+                      {{#if strongestQuality}}<p><strong>Strongest:</strong> {{strongestQuality}}</p>{{/if}}
+                      {{#if primaryWeakness}}<p><strong>Weakness:</strong> {{primaryWeakness}}</p>{{/if}}
+                      {{#if nextMove}}<p><strong>Next move:</strong> {{nextMove}}</p>{{/if}}
                       <p class="judge-critique">{{critique}}</p>
                     </li>
                   {{/each}}

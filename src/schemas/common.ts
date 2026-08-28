@@ -26,7 +26,7 @@ export const AnonymousCandidateIdSchema = z
 export const TaskIdSchema = z
   .string()
   .regex(
-    /^\d{4}-(?:contestant|judge|awards)-[a-z0-9]+(?:-[a-z0-9]+)*$/,
+    /^\d{4}-(?:contestant|render|judge|awards)-[a-z0-9]+(?:-[a-z0-9]+)*$/,
     "must contain a generation, role, and slug",
   );
 

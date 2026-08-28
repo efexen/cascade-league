@@ -1,5 +1,15 @@
 import { createHash, randomBytes as secureRandomBytes } from "node:crypto";
-import { chmod, lstat, mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  lstat,
+  mkdir,
+  readdir,
+  rename,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { z } from "zod";
@@ -13,6 +23,7 @@ import {
 import {
   CandidateJudgmentSchema,
   ChallengeConfigSchema,
+  ContactSheetOrderSchema,
   ContestantsConfigSchema,
   createGenerationAwardsSchema,
   GenerationAwardsSchema,
@@ -24,6 +35,8 @@ import {
   ManifestSchema,
   RunSchema,
   SnapshotSchema,
+  TaskStateSchema,
+  TaskStateStatusSchema,
   ValidationSchema,
   readJsonWithSchema,
   readYamlWithSchema,
@@ -36,6 +49,7 @@ import {
   type Manifest,
   type Run,
   type Snapshot,
+  type TaskState,
   type Validation,
 } from "../schemas/index.js";
 import {
@@ -57,6 +71,7 @@ import {
   type CandidateRenderResult,
   type CandidateRendererOptions,
 } from "../rendering/index.js";
+import { GALLERY_SOURCE_ARCHIVE_FILE } from "../challenge/index.js";
 import { validateSubmission } from "../validation/index.js";
 import {
   buildAnonymousContactSheet,
@@ -94,7 +109,23 @@ export interface WaveBRunOptions {
   readonly contactSheetBuilder?: (
     input: Parameters<typeof buildAnonymousContactSheet>[0],
   ) => Promise<AnonymousContactSheetResult>;
+  /** Enable persisted task-state replay for resume-generation. */
+  readonly resumable?: boolean;
+  readonly afterTask?: (task: WaveBTask) => void | Promise<void>;
   readonly onProgress?: (message: string) => void;
+}
+
+export interface WaveBTask {
+  readonly role: "contestant" | "render" | "judge" | "awards";
+  readonly targetId: string;
+  readonly taskId: string;
+}
+
+export class WaveBInterruptionError extends Error {
+  public constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "WaveBInterruptionError";
+  }
 }
 
 export interface WaveBContestantResult {
@@ -385,7 +416,8 @@ async function verifyContestantWorkspace(
   prompt: string,
 ): Promise<void> {
   const expectedAssets = Object.keys(state.snapshot.assetHashes).filter(
-    (relativePath) => relativePath !== "fallback.css",
+    (relativePath) =>
+      relativePath !== "fallback.css" && relativePath !== GALLERY_SOURCE_ARCHIVE_FILE,
   );
   for (const relativePath of expectedAssets) {
     await verifyRegularFileHash(
@@ -675,6 +707,209 @@ async function updateManifest(
   return writeJsonArtifact(path, ManifestSchema, { ...current, ...update });
 }
 
+type TaskRole = WaveBTask["role"];
+type TaskStateStatus = z.infer<typeof TaskStateStatusSchema>;
+
+const TERMINAL_TASK_STATUSES = new Set<TaskStateStatus>([
+  "succeeded",
+  "failed",
+  "timeout",
+  "missing_submission",
+  "invalid",
+  "uncertain",
+]);
+
+function taskPath(generationPath: string, role: TaskRole, targetId: string): string {
+  if (role === "contestant")
+    return join(generationPath, "contestants", targetId, "task.json");
+  if (role === "render")
+    return join(generationPath, "contestants", targetId, "render-task.json");
+  if (role === "judge") {
+    const separator = targetId.indexOf("\0");
+    if (separator < 1)
+      throw new Error("judge task target must contain a judge and candidate ID");
+    const judgeId = targetId.slice(0, separator);
+    const anonymousCandidateId = targetId.slice(separator + 1);
+    return join(
+      generationPath,
+      "judging",
+      judgeId,
+      "tasks",
+      `${anonymousCandidateId}.json`,
+    );
+  }
+  return join(generationPath, "judging", targetId, "awards-task.json");
+}
+
+function taskIdentifier(
+  generationId: string,
+  role: TaskRole,
+  targetId: string,
+): string {
+  if (role === "judge") {
+    const separator = targetId.indexOf("\0");
+    const judgeId = targetId.slice(0, separator);
+    const anonymousCandidateId = targetId.slice(separator + 1);
+    return `${generationId}-judge-${judgeId}-${anonymousCandidateId}`;
+  }
+  return `${generationId}-${role}-${targetId}`;
+}
+
+async function readTaskState(path: string): Promise<TaskState | null> {
+  if (!(await regularFileExists(path))) return null;
+  return TaskStateSchema.parse(JSON.parse(await readFile(path, "utf8")) as unknown);
+}
+
+async function writeTaskState(
+  path: string,
+  value: {
+    readonly taskId: string;
+    readonly role: TaskRole;
+    readonly targetId: string;
+    readonly status: TaskStateStatus;
+    readonly startedAt: string | null;
+    readonly completedAt: string | null;
+    readonly attemptCount: number;
+    readonly requestAccepted: boolean | null;
+    readonly error: string | null;
+  },
+): Promise<TaskState> {
+  return writeJsonArtifact(path, TaskStateSchema, {
+    schemaVersion: 1,
+    ...value,
+  });
+}
+
+async function ensurePendingTaskState(
+  generationPath: string,
+  generationId: string,
+  role: TaskRole,
+  targetId: string,
+): Promise<TaskState> {
+  const path = taskPath(generationPath, role, targetId);
+  const existing = await readTaskState(path);
+  if (existing !== null) return existing;
+  return writeTaskState(path, {
+    taskId: taskIdentifier(generationId, role, targetId),
+    role,
+    targetId,
+    status: "pending",
+    startedAt: null,
+    completedAt: null,
+    attemptCount: 0,
+    requestAccepted: null,
+    error: null,
+  });
+}
+
+async function beginTask(
+  generationPath: string,
+  generationId: string,
+  role: TaskRole,
+  targetId: string,
+  clock: () => Date,
+): Promise<TaskState> {
+  const path = taskPath(generationPath, role, targetId);
+  const existing = await ensurePendingTaskState(
+    generationPath,
+    generationId,
+    role,
+    targetId,
+  );
+  if (existing.status === "running" || TERMINAL_TASK_STATUSES.has(existing.status)) {
+    return existing;
+  }
+  return writeTaskState(path, {
+    taskId: existing.taskId,
+    role,
+    targetId,
+    status: "running",
+    startedAt: timestamp(clock()),
+    completedAt: null,
+    attemptCount: existing.attemptCount + 1,
+    requestAccepted: null,
+    error: null,
+  });
+}
+
+async function finishTask(
+  generationPath: string,
+  generationId: string,
+  role: TaskRole,
+  targetId: string,
+  status: Exclude<TaskStateStatus, "pending" | "running">,
+  clock: () => Date,
+  error: string | null,
+  requestAccepted: boolean | null,
+): Promise<TaskState> {
+  const path = taskPath(generationPath, role, targetId);
+  const existing = await ensurePendingTaskState(
+    generationPath,
+    generationId,
+    role,
+    targetId,
+  );
+  return writeTaskState(path, {
+    taskId: existing.taskId,
+    role,
+    targetId,
+    status,
+    startedAt: existing.startedAt ?? timestamp(clock()),
+    completedAt: timestamp(clock()),
+    attemptCount: Math.max(1, existing.attemptCount),
+    requestAccepted,
+    error,
+  });
+}
+
+async function markTaskUncertain(
+  generationPath: string,
+  generationId: string,
+  role: TaskRole,
+  targetId: string,
+  clock: () => Date,
+  error: string,
+): Promise<TaskState> {
+  return finishTask(
+    generationPath,
+    generationId,
+    role,
+    targetId,
+    "uncertain",
+    clock,
+    error,
+    null,
+  );
+}
+
+function executionTaskStatus(
+  run: Run,
+): Exclude<TaskStateStatus, "pending" | "running"> {
+  if (run.status === "succeeded") return "succeeded";
+  if (run.status === "timeout") return "timeout";
+  if (run.status === "missing_submission") return "missing_submission";
+  if (run.status === "uncertain") return "uncertain";
+  return "failed";
+}
+
+function renderTaskStatus(
+  validation: Validation,
+): Exclude<TaskStateStatus, "pending" | "running"> {
+  if (validation.status === "valid") return "succeeded";
+  return validation.status === "render_failed" ? "failed" : "invalid";
+}
+
+async function notifyTask(
+  afterTask: WaveBRunOptions["afterTask"],
+  task: WaveBTask,
+): Promise<void> {
+  try {
+    await afterTask?.(task);
+  } catch (error) {
+    throw new WaveBInterruptionError(error);
+  }
+}
+
 async function ensureContestantPrompt(
   contestantPath: string,
   workspacePath: string,
@@ -717,7 +952,7 @@ function adapterFailureResult(
   };
 }
 
-async function runOneContestant(input: {
+interface RunContestantInput {
   readonly generationPath: string;
   readonly generationId: string;
   readonly contestant: ContestantConfig;
@@ -732,7 +967,12 @@ async function runOneContestant(input: {
       input: Parameters<typeof renderCandidate>[0],
     ): Promise<CandidateRenderResult>;
   };
-}): Promise<WaveBContestantResult> {
+  readonly onExecutionComplete?: (run: Run) => Promise<void>;
+}
+
+async function runOneContestant(
+  input: RunContestantInput,
+): Promise<WaveBContestantResult> {
   const contestantPath = join(input.generationPath, "contestants", input.contestant.id);
   const workspacePath = join(contestantPath, "workspace");
   const runPath = join(contestantPath, "run.json");
@@ -882,6 +1122,7 @@ async function runOneContestant(input: {
       error: integrityError ?? runResult.error,
     });
     await writeJsonArtifact(runPath, RunSchema, completedRun);
+    await input.onExecutionComplete?.(completedRun);
 
     let validation: Validation;
     if (
@@ -1007,6 +1248,451 @@ async function runOneContestant(input: {
   }
 }
 
+async function restoreContestantWorkspace(input: RunContestantInput): Promise<string> {
+  const contestantPath = join(input.generationPath, "contestants", input.contestant.id);
+  const workspacePath = join(contestantPath, "workspace");
+  await removeWorkspace(workspacePath);
+  await mkdir(workspacePath, { recursive: true });
+  for (const relativePath of Object.keys(
+    input.canonicalState.snapshot.assetHashes,
+  ).filter((file) => file !== "fallback.css" && file !== GALLERY_SOURCE_ARCHIVE_FILE)) {
+    const sourcePath = join(input.generationPath, "challenge", relativePath);
+    const destinationPath = join(workspacePath, relativePath);
+    await mkdir(dirname(destinationPath), { recursive: true });
+    await copyFile(sourcePath, destinationPath);
+  }
+  const prompt = await ensureContestantPrompt(contestantPath, workspacePath);
+  await verifyContestantWorkspace(input.canonicalState, workspacePath, prompt);
+  return prompt;
+}
+
+async function continueContestantAfterExecution(
+  input: RunContestantInput,
+  existingRun: Run,
+): Promise<WaveBContestantResult> {
+  const contestantPath = join(input.generationPath, "contestants", input.contestant.id);
+  const workspacePath = join(contestantPath, "workspace");
+  const submissionArtifactPath = join(contestantPath, "submission.css");
+  let completedRun = existingRun;
+  let integrityError: string | null = null;
+  let validation: Validation;
+  try {
+    await restoreContestantWorkspace(input);
+    try {
+      await verifyCanonicalGenerationState(input.canonicalState);
+    } catch (error) {
+      integrityError = `canonical contestant input integrity check failed: ${boundedError(error)}`;
+      throw new Error(integrityError);
+    }
+    const staticResult = await validateSubmission({
+      submissionPath: submissionArtifactPath,
+      challengeRoot: join(input.generationPath, "challenge"),
+      starterCssPath: join(input.generationPath, "challenge/starter.css"),
+      maximumBytes: input.challengeConfig.submission.maximumBytes,
+    });
+    validation = staticResult.validation;
+    if (staticResult.sanitisedCss !== null) {
+      if (validation.sanitisedSha256 === null) {
+        throw new Error("valid CSS validation is missing its sanitised hash");
+      }
+      const sanitisedPath = join(contestantPath, "sanitised.css");
+      await writeTextAtomically(sanitisedPath, staticResult.sanitisedCss);
+      await verifyRegularFileHash(
+        sanitisedPath,
+        validation.sanitisedSha256,
+        "sanitised CSS",
+        contestantPath,
+      );
+      await verifyCanonicalGenerationState(input.canonicalState);
+      const render = await input.renderer.render({
+        candidateRootPath: workspacePath,
+        canonicalChallengeRootPath: join(input.generationPath, "challenge"),
+        submissionPath: submissionArtifactPath,
+        screenshotPath: join(contestantPath, "screenshot.png"),
+        challengeConfig: input.challengeConfig,
+      });
+      try {
+        await verifyCanonicalGenerationState(input.canonicalState);
+      } catch (error) {
+        integrityError = `canonical contestant input integrity check failed: ${boundedError(error)}`;
+        await rm(join(contestantPath, "screenshot.png"), { force: true });
+        throw new Error(integrityError);
+      }
+      validation =
+        render.status === "valid"
+          ? validRenderValidation(validation, render)
+          : renderFailureValidation(validation, render);
+    }
+  } catch (error) {
+    if (integrityError === null) {
+      try {
+        await verifyCanonicalGenerationState(input.canonicalState);
+      } catch (canonicalError) {
+        integrityError = `canonical contestant input integrity check failed: ${boundedError(canonicalError)}`;
+      }
+    }
+    if (integrityError !== null) {
+      completedRun = RunSchema.parse({
+        ...completedRun,
+        status: "failed",
+        error: integrityError,
+      });
+      await writeJsonArtifact(
+        join(contestantPath, "run.json"),
+        RunSchema,
+        completedRun,
+      );
+      validation = executionFailureValidation(integrityError);
+    } else {
+      validation = executionFailureValidation(boundedError(error));
+    }
+  } finally {
+    await removeWorkspace(workspacePath);
+  }
+  await writeJsonArtifact(
+    join(contestantPath, "validation.json"),
+    ValidationSchema,
+    validation,
+  );
+  return {
+    contestantId: input.contestant.id,
+    anonymousCandidateId: input.anonymousCandidateId,
+    path: contestantPath,
+    run: completedRun,
+    validation,
+    screenshotPath:
+      validation.status === "valid" &&
+      (await regularFileExists(join(contestantPath, "screenshot.png")))
+        ? join(contestantPath, "screenshot.png")
+        : null,
+    integrityFailed: integrityError !== null,
+    canonicalIntegrityFailed:
+      integrityError?.includes("canonical contestant input integrity check failed") ??
+      false,
+  };
+}
+
+async function readContestantResult(
+  generationPath: string,
+  contestant: ContestantConfig,
+  anonymousCandidateId: string,
+): Promise<WaveBContestantResult> {
+  const contestantPath = join(generationPath, "contestants", contestant.id);
+  const run = await readJsonWithSchema(join(contestantPath, "run.json"), RunSchema);
+  const validation = await readJsonWithSchema(
+    join(contestantPath, "validation.json"),
+    ValidationSchema,
+  );
+  return {
+    contestantId: contestant.id,
+    anonymousCandidateId,
+    path: contestantPath,
+    run,
+    validation,
+    screenshotPath:
+      validation.status === "valid" &&
+      (await regularFileExists(join(contestantPath, "screenshot.png")))
+        ? join(contestantPath, "screenshot.png")
+        : null,
+    integrityFailed: false,
+    canonicalIntegrityFailed: false,
+  };
+}
+
+async function markContestantUncertain(input: {
+  readonly generationPath: string;
+  readonly generationId: string;
+  readonly contestant: ContestantConfig;
+  readonly anonymousCandidateId: string;
+  readonly clock: () => Date;
+  readonly reason: string;
+}): Promise<WaveBContestantResult> {
+  const contestantPath = join(input.generationPath, "contestants", input.contestant.id);
+  const runPath = join(contestantPath, "run.json");
+  const existingRun = await readJsonWithSchema(runPath, RunSchema);
+  const completedAt = timestamp(input.clock());
+  const startedAt = existingRun.startedAt ?? completedAt;
+  const startedTime = Date.parse(startedAt);
+  const completedTime = Date.parse(completedAt);
+  const uncertainRun = RunSchema.parse({
+    ...existingRun,
+    status: "uncertain",
+    startedAt,
+    completedAt,
+    durationMs: Math.max(0, completedTime - startedTime),
+    attemptCount: Math.max(1, existingRun.attemptCount),
+    error: input.reason,
+  });
+  await writeJsonArtifact(runPath, RunSchema, uncertainRun);
+  const validation = executionFailureValidation(input.reason);
+  await writeJsonArtifact(
+    join(contestantPath, "validation.json"),
+    ValidationSchema,
+    validation,
+  );
+  await finishTask(
+    input.generationPath,
+    input.generationId,
+    "contestant",
+    input.contestant.id,
+    "uncertain",
+    input.clock,
+    input.reason,
+    null,
+  );
+  return {
+    contestantId: input.contestant.id,
+    anonymousCandidateId: input.anonymousCandidateId,
+    path: contestantPath,
+    run: uncertainRun,
+    validation,
+    screenshotPath: null,
+    integrityFailed: false,
+    canonicalIntegrityFailed: false,
+  };
+}
+
+async function runOneContestantResumable(
+  input: RunContestantInput & {
+    readonly generationId: string;
+    readonly options: WaveBRunOptions;
+  },
+): Promise<WaveBContestantResult> {
+  const contestantPath = join(input.generationPath, "contestants", input.contestant.id);
+  const run = await readJsonWithSchema(join(contestantPath, "run.json"), RunSchema);
+  const executionTask = await ensurePendingTaskState(
+    input.generationPath,
+    input.generationId,
+    "contestant",
+    input.contestant.id,
+  );
+  const validationExists = await regularFileExists(
+    join(contestantPath, "validation.json"),
+  );
+  const existingValidation = validationExists
+    ? await readJsonWithSchema(
+        join(contestantPath, "validation.json"),
+        ValidationSchema,
+      )
+    : null;
+  const screenshotExists = await regularFileExists(
+    join(contestantPath, "screenshot.png"),
+  );
+
+  if (
+    run.status === "running" ||
+    (run.status === "pending" && executionTask.status !== "pending")
+  ) {
+    const reason =
+      run.status === "pending" && executionTask.status !== "pending"
+        ? "contestant task state was not pending while contestant execution was pending; request outcome is uncertain"
+        : "contestant task was running when the generation was resumed; request outcome is uncertain";
+    const result = await markContestantUncertain({
+      generationPath: input.generationPath,
+      generationId: input.generationId,
+      contestant: input.contestant,
+      anonymousCandidateId: input.anonymousCandidateId,
+      clock: input.clock,
+      reason,
+    });
+    await finishTask(
+      input.generationPath,
+      input.generationId,
+      "render",
+      input.contestant.id,
+      "invalid",
+      input.clock,
+      "render was not run because contestant execution outcome is uncertain",
+      null,
+    );
+    return result;
+  }
+
+  if (executionTask.status === "running") {
+    await finishTask(
+      input.generationPath,
+      input.generationId,
+      "contestant",
+      input.contestant.id,
+      executionTaskStatus(run),
+      input.clock,
+      run.error,
+      run.status === "succeeded" ? true : null,
+    );
+  }
+
+  if (
+    run.status === "succeeded" &&
+    (existingValidation === null ||
+      (existingValidation.status === "valid" && !screenshotExists))
+  ) {
+    if (executionTask.status === "pending") {
+      await finishTask(
+        input.generationPath,
+        input.generationId,
+        "contestant",
+        input.contestant.id,
+        "succeeded",
+        input.clock,
+        null,
+        true,
+      );
+    }
+    const result = await continueContestantAfterExecution(input, run);
+    await finishTask(
+      input.generationPath,
+      input.generationId,
+      "render",
+      input.contestant.id,
+      renderTaskStatus(result.validation),
+      input.clock,
+      result.validation.errors[0] ?? null,
+      null,
+    );
+    await notifyTask(input.options.afterTask, {
+      role: "render",
+      targetId: input.contestant.id,
+      taskId: taskIdentifier(input.generationId, "render", input.contestant.id),
+    });
+    return result;
+  }
+
+  if (run.status !== "pending") {
+    const validation = existingValidation;
+    if (validation !== null && executionTask.status === "pending") {
+      await finishTask(
+        input.generationPath,
+        input.generationId,
+        "contestant",
+        input.contestant.id,
+        executionTaskStatus(run),
+        input.clock,
+        run.error,
+        run.status === "succeeded" ? true : null,
+      );
+    }
+    const completedRenderTask = await ensurePendingTaskState(
+      input.generationPath,
+      input.generationId,
+      "render",
+      input.contestant.id,
+    );
+    if (validation !== null && completedRenderTask.status === "pending") {
+      await finishTask(
+        input.generationPath,
+        input.generationId,
+        "render",
+        input.contestant.id,
+        renderTaskStatus(validation),
+        input.clock,
+        validation.errors[0] ?? null,
+        null,
+      );
+      return readContestantResult(
+        input.generationPath,
+        input.contestant,
+        input.anonymousCandidateId,
+      );
+    }
+    if (validation !== null) {
+      return readContestantResult(
+        input.generationPath,
+        input.contestant,
+        input.anonymousCandidateId,
+      );
+    }
+    if (!validationExists) {
+      const failureValidation = executionFailureValidation(
+        run.error ?? "contestant task completed without a validation artifact",
+      );
+      await writeJsonArtifact(
+        join(contestantPath, "validation.json"),
+        ValidationSchema,
+        failureValidation,
+      );
+    }
+    if (executionTask.status === "pending") {
+      await finishTask(
+        input.generationPath,
+        input.generationId,
+        "contestant",
+        input.contestant.id,
+        executionTaskStatus(run),
+        input.clock,
+        run.error,
+        null,
+      );
+    }
+    const renderTask = await ensurePendingTaskState(
+      input.generationPath,
+      input.generationId,
+      "render",
+      input.contestant.id,
+    );
+    if (renderTask.status === "pending") {
+      await finishTask(
+        input.generationPath,
+        input.generationId,
+        "render",
+        input.contestant.id,
+        "invalid",
+        input.clock,
+        "render was not run because contestant execution did not succeed",
+        null,
+      );
+    }
+    return readContestantResult(
+      input.generationPath,
+      input.contestant,
+      input.anonymousCandidateId,
+    );
+  }
+
+  await beginTask(
+    input.generationPath,
+    input.generationId,
+    "contestant",
+    input.contestant.id,
+    input.clock,
+  );
+  const result = await runOneContestant({
+    ...input,
+    onExecutionComplete: async (completedRun) => {
+      await finishTask(
+        input.generationPath,
+        input.generationId,
+        "contestant",
+        input.contestant.id,
+        executionTaskStatus(completedRun),
+        input.clock,
+        completedRun.error,
+        completedRun.status === "succeeded" ? true : null,
+      );
+      await notifyTask(input.options.afterTask, {
+        role: "contestant",
+        targetId: input.contestant.id,
+        taskId: taskIdentifier(input.generationId, "contestant", input.contestant.id),
+      });
+    },
+  });
+  await finishTask(
+    input.generationPath,
+    input.generationId,
+    "render",
+    input.contestant.id,
+    renderTaskStatus(result.validation),
+    input.clock,
+    result.validation.errors[0] ?? null,
+    null,
+  );
+  await notifyTask(input.options.afterTask, {
+    role: "render",
+    targetId: input.contestant.id,
+    taskId: taskIdentifier(input.generationId, "render", input.contestant.id),
+  });
+  return result;
+}
+
 async function stageFile(
   sourcePath: string,
   destinationPath: string,
@@ -1076,6 +1762,38 @@ function makeJudgeAdapterFailure(error: unknown): JudgeAwardsResult {
   };
 }
 
+function awardsTaskStatus(
+  result: JudgeAwardsResult,
+): Exclude<TaskStateStatus, "pending" | "running"> {
+  if (result.status === "succeeded" && result.awards !== null) return "succeeded";
+  if (result.status === "timeout") return "timeout";
+  if (result.status === "invalid") return "invalid";
+  return "failed";
+}
+
+function awardsResultFromTask(state: TaskState): JudgeAwardsResult {
+  const status =
+    state.status === "invalid"
+      ? "invalid"
+      : state.status === "timeout"
+        ? "timeout"
+        : "failed";
+  return {
+    status,
+    awards: null,
+    rawOutput: null,
+    usage: {
+      inputTokens: null,
+      outputTokens: null,
+      totalTokens: null,
+      estimatedCostUsd: null,
+    },
+    error: state.error ?? `awards task ended with status ${state.status}`,
+    timedOut: status === "timeout",
+    attemptCount: 1,
+  };
+}
+
 function makeJudgeCandidateFailure(error: unknown): JudgeCandidateResult {
   return {
     status: "failed",
@@ -1090,6 +1808,39 @@ function makeJudgeCandidateFailure(error: unknown): JudgeCandidateResult {
     rawOutput: null,
     error: boundedError(error),
     timedOut: false,
+    attemptCount: 1,
+  };
+}
+
+function judgeTaskStatus(
+  result: JudgeCandidateResult,
+): Exclude<TaskStateStatus, "pending" | "running"> {
+  if (result.status === "succeeded" && result.judgment !== null) return "succeeded";
+  if (result.status === "timeout") return "timeout";
+  if (result.status === "invalid") return "invalid";
+  return "failed";
+}
+
+function judgeResultFromTask(state: TaskState): JudgeCandidateResult {
+  const status =
+    state.status === "invalid"
+      ? "invalid"
+      : state.status === "timeout"
+        ? "timeout"
+        : "failed";
+  return {
+    status,
+    response: null,
+    judgment: null,
+    usage: {
+      inputTokens: null,
+      outputTokens: null,
+      totalTokens: null,
+      estimatedCostUsd: null,
+    },
+    rawOutput: null,
+    error: state.error ?? `judge task ended with status ${state.status}`,
+    timedOut: status === "timeout",
     attemptCount: 1,
   };
 }
@@ -1131,6 +1882,127 @@ async function makeJudgeFailureResult(
   };
 }
 
+async function markJudgeSetupFailure(input: {
+  readonly generationPath: string;
+  readonly generationId: string;
+  readonly judgeId: string;
+  readonly contestants: readonly WaveBContestantResult[];
+  readonly clock: () => Date;
+  readonly reason: string;
+}): Promise<void> {
+  const finishPending = async (
+    role: "judge" | "awards",
+    targetId: string,
+  ): Promise<void> => {
+    const task = await ensurePendingTaskState(
+      input.generationPath,
+      input.generationId,
+      role,
+      targetId,
+    );
+    if (task.status === "pending") {
+      await finishTask(
+        input.generationPath,
+        input.generationId,
+        role,
+        targetId,
+        "failed",
+        input.clock,
+        input.reason,
+        null,
+      );
+    } else if (task.status === "running") {
+      await markTaskUncertain(
+        input.generationPath,
+        input.generationId,
+        role,
+        targetId,
+        input.clock,
+        input.reason,
+      );
+    }
+  };
+  await Promise.all([
+    ...input.contestants.map((contestant) =>
+      finishPending("judge", `${input.judgeId}\0${contestant.anonymousCandidateId}`),
+    ),
+    finishPending("awards", input.judgeId),
+  ]);
+}
+
+async function loadReusableContactSheet(input: {
+  readonly generationPath: string;
+  readonly generationId: string;
+  readonly judgeId: string;
+  readonly candidateIds: readonly string[];
+}): Promise<AnonymousContactSheetResult | null> {
+  const outputPath = join(
+    input.generationPath,
+    "judging",
+    input.judgeId,
+    "contact-sheet.png",
+  );
+  const orderPath = join(
+    input.generationPath,
+    "judging",
+    input.judgeId,
+    "contact-sheet-order.json",
+  );
+  if (!(await regularFileExists(outputPath)) || !(await regularFileExists(orderPath))) {
+    return null;
+  }
+  try {
+    const order = await readJsonWithSchema(orderPath, ContactSheetOrderSchema);
+    if (
+      order.generationId !== input.generationId ||
+      order.judgeId !== input.judgeId ||
+      order.candidateOrder.length !== input.candidateIds.length ||
+      [...order.candidateOrder]
+        .sort()
+        .some(
+          (candidateId, index) => candidateId !== [...input.candidateIds].sort()[index],
+        )
+    ) {
+      return null;
+    }
+    return {
+      seed: order.seed,
+      candidateOrder: order.candidateOrder,
+      outputPath,
+      orderPath,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function loadReusableAssessmentOrder(input: {
+  readonly path: string;
+  readonly generationId: string;
+  readonly judgeId: string;
+  readonly candidateIds: readonly string[];
+}): Promise<z.infer<typeof JudgeAssessmentOrderSchema> | null> {
+  if (!(await regularFileExists(input.path))) return null;
+  try {
+    const order = await readJsonWithSchema(input.path, JudgeAssessmentOrderSchema);
+    if (
+      order.generationId !== input.generationId ||
+      order.judgeId !== input.judgeId ||
+      order.assessmentOrder.length !== input.candidateIds.length ||
+      [...order.assessmentOrder]
+        .sort()
+        .some(
+          (candidateId, index) => candidateId !== [...input.candidateIds].sort()[index],
+        )
+    ) {
+      return null;
+    }
+    return order;
+  } catch {
+    return null;
+  }
+}
+
 async function runOneJudge(input: {
   readonly generationPath: string;
   readonly generationId: string;
@@ -1143,6 +2015,8 @@ async function runOneJudge(input: {
   readonly contactSheetBuilder: (
     input: Parameters<typeof buildAnonymousContactSheet>[0],
   ) => Promise<AnonymousContactSheetResult>;
+  readonly resumable?: boolean;
+  readonly afterTask?: (task: WaveBTask) => void | Promise<void>;
 }): Promise<WaveBJudgeResult> {
   const judgePath = join(input.generationPath, "judging", input.judge.id);
   let contact: AnonymousContactSheetResult | null = null;
@@ -1151,23 +2025,34 @@ async function runOneJudge(input: {
     await mkdir(judgePath, { recursive: true });
     await removeWorkspace(join(judgePath, "workspaces"));
     await removeWorkspace(join(judgePath, "awards-workspace"));
-    contact = await input.contactSheetBuilder({
-      generationId: input.generationId,
-      judgeId: input.judge.id,
-      candidates: input.contestants.map((contestant) => ({
-        anonymousCandidateId: contestant.anonymousCandidateId,
-        validationStatus: contestantContactStatus(contestant),
-        screenshotPath: contestant.screenshotPath,
-      })),
-      outputPath: join(judgePath, "contact-sheet.png"),
-      orderPath: join(judgePath, "contact-sheet-order.json"),
-      seed: domainSeparatedJudgeSeed(
-        input.randomBytes,
-        input.generationId,
-        input.judge.id,
-        "contact-sheet",
-      ),
-    });
+    contact =
+      (input.resumable === true
+        ? await loadReusableContactSheet({
+            generationPath: input.generationPath,
+            generationId: input.generationId,
+            judgeId: input.judge.id,
+            candidateIds: input.contestants.map(
+              (contestant) => contestant.anonymousCandidateId,
+            ),
+          })
+        : null) ??
+      (await input.contactSheetBuilder({
+        generationId: input.generationId,
+        judgeId: input.judge.id,
+        candidates: input.contestants.map((contestant) => ({
+          anonymousCandidateId: contestant.anonymousCandidateId,
+          validationStatus: contestantContactStatus(contestant),
+          screenshotPath: contestant.screenshotPath,
+        })),
+        outputPath: join(judgePath, "contact-sheet.png"),
+        orderPath: join(judgePath, "contact-sheet-order.json"),
+        seed: domainSeparatedJudgeSeed(
+          input.randomBytes,
+          input.generationId,
+          input.judge.id,
+          "contact-sheet",
+        ),
+      }));
   } catch (error) {
     judgeFailure = `contact-sheet setup failed: ${boundedError(error)}`;
     await rm(join(judgePath, "contact-sheet.png"), { force: true }).catch(
@@ -1177,6 +2062,16 @@ async function runOneJudge(input: {
       () => undefined,
     );
     await writePrivateFailure(join(judgePath, "failure.txt"), judgeFailure);
+    if (input.resumable === true) {
+      await markJudgeSetupFailure({
+        generationPath: input.generationPath,
+        generationId: input.generationId,
+        judgeId: input.judge.id,
+        contestants: input.contestants,
+        clock: input.clock,
+        reason: judgeFailure,
+      });
+    }
     return {
       judgeId: input.judge.id,
       path: judgePath,
@@ -1196,28 +2091,72 @@ async function runOneJudge(input: {
       contestant.screenshotPath !== null &&
       contestant.run.status === "succeeded",
   );
+  if (input.resumable === true) {
+    const renderableIds = new Set(
+      renderable.map((contestant) => contestant.anonymousCandidateId),
+    );
+    await Promise.all(
+      input.contestants
+        .filter((contestant) => !renderableIds.has(contestant.anonymousCandidateId))
+        .map(async (contestant) => {
+          const anonymousCandidateId = contestant.anonymousCandidateId;
+          const taskTargetId = `${input.judge.id}\0${anonymousCandidateId}`;
+          const task = await ensurePendingTaskState(
+            input.generationPath,
+            input.generationId,
+            "judge",
+            taskTargetId,
+          );
+          if (task.status === "pending") {
+            await finishTask(
+              input.generationPath,
+              input.generationId,
+              "judge",
+              taskTargetId,
+              "invalid",
+              input.clock,
+              "candidate is not renderable",
+              null,
+            );
+          }
+        }),
+    );
+  }
   const executionOrder = renderable.map(
     (contestant) => contestant.anonymousCandidateId,
-  );
-  const assessmentSeed = domainSeparatedJudgeSeed(
-    input.randomBytes,
-    input.generationId,
-    input.judge.id,
-    "assessment",
   );
   const contactRenderableOrder = contact.candidateOrder.filter((candidateId) =>
     executionOrder.includes(candidateId),
   );
-  const assessmentOrder = independentOrder(
-    assessmentSeed,
-    executionOrder,
-    executionOrder,
-    contactRenderableOrder,
-  );
   const assessmentOrderPath =
     renderable.length === 0 ? null : join(judgePath, "assessment-order.json");
+  const reusableAssessment =
+    input.resumable === true && assessmentOrderPath !== null
+      ? await loadReusableAssessmentOrder({
+          path: assessmentOrderPath,
+          generationId: input.generationId,
+          judgeId: input.judge.id,
+          candidateIds: executionOrder,
+        })
+      : null;
+  const assessmentSeed =
+    reusableAssessment?.seed ??
+    domainSeparatedJudgeSeed(
+      input.randomBytes,
+      input.generationId,
+      input.judge.id,
+      "assessment",
+    );
+  const assessmentOrder =
+    reusableAssessment?.assessmentOrder ??
+    independentOrder(
+      assessmentSeed,
+      executionOrder,
+      executionOrder,
+      contactRenderableOrder,
+    );
   try {
-    if (assessmentOrderPath !== null) {
+    if (assessmentOrderPath !== null && reusableAssessment === null) {
       await writeJsonArtifact(assessmentOrderPath, JudgeAssessmentOrderSchema, {
         schemaVersion: 1,
         generationId: input.generationId,
@@ -1229,6 +2168,16 @@ async function runOneJudge(input: {
   } catch (error) {
     judgeFailure = `assessment-order setup failed: ${boundedError(error)}`;
     await writePrivateFailure(join(judgePath, "failure.txt"), judgeFailure);
+    if (input.resumable === true) {
+      await markJudgeSetupFailure({
+        generationPath: input.generationPath,
+        generationId: input.generationId,
+        judgeId: input.judge.id,
+        contestants: input.contestants,
+        clock: input.clock,
+        reason: judgeFailure,
+      });
+    }
     return {
       judgeId: input.judge.id,
       path: judgePath,
@@ -1252,9 +2201,44 @@ async function runOneJudge(input: {
     async (anonymousCandidateId): Promise<WaveBJudgeCandidateResult> => {
       const taskStarted = input.clock();
       const taskStartedAt = timestamp(taskStarted);
+      const taskTargetId = `${input.judge.id}\0${anonymousCandidateId}`;
+      const candidateTask =
+        input.resumable === true
+          ? await ensurePendingTaskState(
+              input.generationPath,
+              input.generationId,
+              "judge",
+              taskTargetId,
+            )
+          : null;
       const contestant = contestantsByAnonymousId.get(anonymousCandidateId);
       if (contestant === undefined || contestant.screenshotPath === null) {
         const taskCompleted = input.clock();
+        if (input.resumable === true && candidateTask !== null) {
+          const taskResult =
+            candidateTask.status === "running"
+              ? await markTaskUncertain(
+                  input.generationPath,
+                  input.generationId,
+                  "judge",
+                  taskTargetId,
+                  input.clock,
+                  "candidate is not renderable after an interrupted judge task",
+                )
+              : candidateTask;
+          if (taskResult.status === "pending") {
+            await finishTask(
+              input.generationPath,
+              input.generationId,
+              "judge",
+              taskTargetId,
+              "invalid",
+              input.clock,
+              "candidate is not renderable",
+              null,
+            );
+          }
+        }
         return {
           anonymousCandidateId,
           result: makeJudgeCandidateFailure("candidate is not renderable"),
@@ -1263,6 +2247,102 @@ async function runOneJudge(input: {
           completedAt: timestamp(taskCompleted),
           durationMs: Math.max(0, taskCompleted.getTime() - taskStarted.getTime()),
         };
+      }
+      if (input.resumable === true && candidateTask !== null) {
+        const durablePath = join(judgePath, `${anonymousCandidateId}.json`);
+        let durableJudgment: z.infer<typeof CandidateJudgmentSchema> | null = null;
+        if (await regularFileExists(durablePath)) {
+          try {
+            durableJudgment = await readJsonWithSchema(
+              durablePath,
+              CandidateJudgmentSchema,
+            );
+          } catch {
+            durableJudgment = null;
+          }
+        }
+        if (durableJudgment !== null) {
+          if (candidateTask.status !== "succeeded") {
+            await finishTask(
+              input.generationPath,
+              input.generationId,
+              "judge",
+              taskTargetId,
+              "succeeded",
+              input.clock,
+              null,
+              true,
+            );
+          }
+          const completedAt = candidateTask.completedAt ?? timestamp(input.clock());
+          return {
+            anonymousCandidateId,
+            result: {
+              status: "succeeded",
+              response: null,
+              judgment: durableJudgment,
+              usage: durableJudgment.modelUsage,
+              rawOutput: null,
+              error: null,
+              timedOut: false,
+              attemptCount: 1,
+            },
+            durablePath,
+            startedAt: candidateTask.startedAt ?? taskStartedAt,
+            completedAt,
+            durationMs: Math.max(
+              0,
+              Date.parse(completedAt) -
+                Date.parse(candidateTask.startedAt ?? taskStartedAt),
+            ),
+          };
+        }
+        if (TERMINAL_TASK_STATUSES.has(candidateTask.status)) {
+          const failedResult = judgeResultFromTask(candidateTask);
+          const completedAt = candidateTask.completedAt ?? timestamp(input.clock());
+          return {
+            anonymousCandidateId,
+            result: failedResult,
+            durablePath: null,
+            startedAt: candidateTask.startedAt ?? taskStartedAt,
+            completedAt,
+            durationMs: Math.max(
+              0,
+              Date.parse(completedAt) -
+                Date.parse(candidateTask.startedAt ?? taskStartedAt),
+            ),
+          };
+        }
+        if (candidateTask.status === "running") {
+          const uncertain = await markTaskUncertain(
+            input.generationPath,
+            input.generationId,
+            "judge",
+            taskTargetId,
+            input.clock,
+            "judge task was running when the generation was resumed; request outcome is uncertain",
+          );
+          const completedAt = uncertain.completedAt ?? timestamp(input.clock());
+          return {
+            anonymousCandidateId,
+            result: judgeResultFromTask(uncertain),
+            durablePath: null,
+            startedAt: uncertain.startedAt ?? taskStartedAt,
+            completedAt,
+            durationMs: Math.max(
+              0,
+              Date.parse(completedAt) -
+                Date.parse(uncertain.startedAt ?? taskStartedAt),
+            ),
+          };
+        }
+        await beginTask(
+          input.generationPath,
+          input.generationId,
+          "judge",
+          taskTargetId,
+          input.clock,
+        );
       }
       const candidateWorkspace = join(judgePath, "workspaces", anonymousCandidateId);
       const rawOutputPath = join(judgePath, "raw", `${anonymousCandidateId}.json`);
@@ -1391,6 +2471,23 @@ async function runOneJudge(input: {
         taskCompletedAt = timestamp(taskCompleted);
         taskDurationMs = Math.max(0, taskCompleted.getTime() - taskStarted.getTime());
       }
+      if (input.resumable === true) {
+        await finishTask(
+          input.generationPath,
+          input.generationId,
+          "judge",
+          taskTargetId,
+          judgeTaskStatus(acceptedResult),
+          input.clock,
+          acceptedResult.error,
+          null,
+        );
+        await notifyTask(input.afterTask, {
+          role: "judge",
+          targetId: taskTargetId,
+          taskId: taskIdentifier(input.generationId, "judge", taskTargetId),
+        });
+      }
       return {
         anonymousCandidateId,
         result: acceptedResult,
@@ -1423,6 +2520,29 @@ async function runOneJudge(input: {
 
   let awards: JudgeAwardsResult | null = null;
   let awardsTiming: WaveBTaskTiming | null = null;
+  const awardsTaskTargetId = input.judge.id;
+  const awardsTask =
+    input.resumable === true
+      ? await ensurePendingTaskState(
+          input.generationPath,
+          input.generationId,
+          "awards",
+          awardsTaskTargetId,
+        )
+      : null;
+  let awardsResolved = false;
+  if (!allCandidateAssessmentsValid && awardsTask?.status === "pending") {
+    await finishTask(
+      input.generationPath,
+      input.generationId,
+      "awards",
+      awardsTaskTargetId,
+      "invalid",
+      input.clock,
+      "awards were not run because candidate assessments were incomplete",
+      null,
+    );
+  }
   if (allCandidateAssessmentsValid && contact !== null) {
     const awardsCandidates = [...validJudgmentResults].sort((left, right) =>
       left.anonymousCandidateId < right.anonymousCandidateId
@@ -1439,111 +2559,215 @@ async function runOneJudge(input: {
     }));
     const awardsWorkspace = join(judgePath, "awards-workspace");
     const awardsRawPath = join(judgePath, "raw", "awards.json");
-    const awardsStarted = input.clock();
-    const awardsStartedAt = timestamp(awardsStarted);
-    try {
-      await writeJsonArtifact(
-        join(judgePath, "judgment-summary.json"),
-        JudgeSummarySchema,
-        {
-          schemaVersion: 1,
-          generationId: input.generationId,
-          judgeId: input.judge.id,
-          entries: summaries,
-        },
-      );
-      const awardsPrompt = buildJudgeAwardsPrompt({
-        generationId: input.generationId,
-        judgeId: input.judge.id,
-        summaries,
-      });
-      await mkdir(awardsWorkspace, { recursive: true });
-      await stageFile(contact.outputPath, join(awardsWorkspace, "cohort.png"));
-      await stageFile(
-        join(judgePath, "judgment-summary.json"),
-        join(awardsWorkspace, "judgment-summary.json"),
-      );
-      await writeTextAtomically(join(awardsWorkspace, "candidate.css"), ":root {}\n");
-      const awardsPromptPath = join(awardsWorkspace, "prompt.md");
-      await writeTextAtomically(awardsPromptPath, awardsPrompt);
-      await writeTextAtomically(join(judgePath, "awards-prompt.md"), awardsPrompt);
-      awards = await awardsOne(input.adapter, {
-        generationId: input.generationId,
-        judgeId: input.judge.id,
-        judge: input.judge,
-        workspacePath: awardsWorkspace,
-        promptPath: awardsPromptPath,
-        contactSheetPath: join(awardsWorkspace, "cohort.png"),
-        judgmentSummaryPath: join(awardsWorkspace, "judgment-summary.json"),
-        awardsPath: join(awardsWorkspace, "awards.json"),
-        usageOutputPath: join(awardsWorkspace, "usage.json"),
-        rawOutputPath: awardsRawPath,
-        stdoutLogPath: join(
-          input.generationPath,
-          "logs",
-          `awards-${input.judge.id}.stdout.log`,
-        ),
-        stderrLogPath: join(
-          input.generationPath,
-          "logs",
-          `awards-${input.judge.id}.stderr.log`,
-        ),
-        timeoutMs: budget.timeoutMs,
-        maximumOutputTokens: budget.maximumOutputTokens,
-        candidates: awardsCandidates.map((candidate) => ({
-          anonymousCandidateId: candidate.anonymousCandidateId,
-          judgment: candidate.result.judgment,
-          sanitisedCssPath: join(awardsWorkspace, "candidate.css"),
-        })),
-      });
-      if (awards.status === "succeeded" && awards.awards === null) {
-        awards = {
-          ...awards,
-          status: "invalid",
-          error: "awards adapter reported success without awards data",
-        };
-      }
-      if (awards.status === "succeeded" && awards.awards !== null) {
-        const parsedAwards = createGenerationAwardsSchema(
-          validJudgmentResults.map((candidate) => candidate.anonymousCandidateId),
-        ).parse(awards.awards);
-        await writeJsonArtifact(
-          join(judgePath, "awards.json"),
-          GenerationAwardsSchema,
-          parsedAwards,
-        );
-      }
-      if (awards.rawOutput !== null || awards.status !== "succeeded") {
-        await archiveRawOutput(awardsRawPath, awards.rawOutput, awards.error);
-      }
-      if (awards.status !== "succeeded") {
-        judgeFailure = `awards task failed: ${boundedError(awards.error ?? "unknown error")}`;
-        await writePrivateFailure(join(judgePath, "failure.txt"), judgeFailure);
-      }
-      if (await regularFileExists(join(awardsWorkspace, "usage.json"))) {
-        const usageCopied = await copyDeclaredFile(
-          join(awardsWorkspace, "usage.json"),
-          join(judgePath, "usage", "awards.json"),
-          DEFAULT_USAGE_LIMIT_BYTES,
-        );
-        if (!usageCopied) {
-          throw new Error("awards usage metadata could not be archived");
+    if (input.resumable === true && awardsTask !== null) {
+      let storedAwards: z.infer<typeof GenerationAwardsSchema> | null = null;
+      const storedAwardsPath = join(judgePath, "awards.json");
+      if (await regularFileExists(storedAwardsPath)) {
+        try {
+          storedAwards = await readJsonWithSchema(
+            storedAwardsPath,
+            createGenerationAwardsSchema(
+              validJudgmentResults.map((candidate) => candidate.anonymousCandidateId),
+            ),
+          );
+        } catch {
+          storedAwards = null;
         }
       }
-    } catch (error) {
-      awards = makeJudgeAdapterFailure(error);
-      await rm(join(judgePath, "awards.json"), { force: true }).catch(() => undefined);
-      judgeFailure = `awards stage failed: ${boundedError(error)}`;
-      await writePrivateFailure(join(judgePath, "failure.txt"), judgeFailure);
-      await archiveRawOutput(awardsRawPath, null, judgeFailure).catch(() => undefined);
-    } finally {
-      await removeWorkspace(awardsWorkspace);
-      const awardsCompleted = input.clock();
-      awardsTiming = {
-        startedAt: awardsStartedAt,
-        completedAt: timestamp(awardsCompleted),
-        durationMs: Math.max(0, awardsCompleted.getTime() - awardsStarted.getTime()),
-      };
+      if (storedAwards !== null) {
+        if (awardsTask.status !== "succeeded") {
+          await finishTask(
+            input.generationPath,
+            input.generationId,
+            "awards",
+            awardsTaskTargetId,
+            "succeeded",
+            input.clock,
+            null,
+            true,
+          );
+        }
+        awards = {
+          status: "succeeded",
+          awards: storedAwards,
+          rawOutput: null,
+          usage: {
+            inputTokens: null,
+            outputTokens: null,
+            totalTokens: null,
+            estimatedCostUsd: null,
+          },
+          error: null,
+          timedOut: false,
+          attemptCount: 1,
+        };
+        const startedAt = awardsTask.startedAt ?? timestamp(input.clock());
+        const completedAt = awardsTask.completedAt ?? startedAt;
+        awardsTiming = {
+          startedAt,
+          completedAt,
+          durationMs: Math.max(0, Date.parse(completedAt) - Date.parse(startedAt)),
+        };
+        awardsResolved = true;
+      } else if (TERMINAL_TASK_STATUSES.has(awardsTask.status)) {
+        awards = awardsResultFromTask(awardsTask);
+        judgeFailure = `awards task failed: ${boundedError(awards.error ?? "unknown error")}`;
+        await writePrivateFailure(join(judgePath, "failure.txt"), judgeFailure);
+        awardsResolved = true;
+      } else if (awardsTask.status === "running") {
+        const uncertain = await markTaskUncertain(
+          input.generationPath,
+          input.generationId,
+          "awards",
+          awardsTaskTargetId,
+          input.clock,
+          "awards task was running when the generation was resumed; request outcome is uncertain",
+        );
+        awards = awardsResultFromTask(uncertain);
+        judgeFailure = `awards task failed: ${boundedError(awards.error ?? "unknown error")}`;
+        await writePrivateFailure(join(judgePath, "failure.txt"), judgeFailure);
+        awardsResolved = true;
+      } else {
+        await beginTask(
+          input.generationPath,
+          input.generationId,
+          "awards",
+          awardsTaskTargetId,
+          input.clock,
+        );
+      }
+    }
+    if (!awardsResolved) {
+      const awardsStarted = input.clock();
+      const awardsStartedAt = timestamp(awardsStarted);
+      try {
+        await writeJsonArtifact(
+          join(judgePath, "judgment-summary.json"),
+          JudgeSummarySchema,
+          {
+            schemaVersion: 1,
+            generationId: input.generationId,
+            judgeId: input.judge.id,
+            entries: summaries,
+          },
+        );
+        const awardsPrompt = buildJudgeAwardsPrompt({
+          generationId: input.generationId,
+          judgeId: input.judge.id,
+          summaries,
+        });
+        await mkdir(awardsWorkspace, { recursive: true });
+        await stageFile(contact.outputPath, join(awardsWorkspace, "cohort.png"));
+        await stageFile(
+          join(judgePath, "judgment-summary.json"),
+          join(awardsWorkspace, "judgment-summary.json"),
+        );
+        await writeTextAtomically(join(awardsWorkspace, "candidate.css"), ":root {}\n");
+        const awardsPromptPath = join(awardsWorkspace, "prompt.md");
+        await writeTextAtomically(awardsPromptPath, awardsPrompt);
+        await writeTextAtomically(join(judgePath, "awards-prompt.md"), awardsPrompt);
+        awards = await awardsOne(input.adapter, {
+          generationId: input.generationId,
+          judgeId: input.judge.id,
+          judge: input.judge,
+          workspacePath: awardsWorkspace,
+          promptPath: awardsPromptPath,
+          contactSheetPath: join(awardsWorkspace, "cohort.png"),
+          judgmentSummaryPath: join(awardsWorkspace, "judgment-summary.json"),
+          awardsPath: join(awardsWorkspace, "awards.json"),
+          usageOutputPath: join(awardsWorkspace, "usage.json"),
+          rawOutputPath: awardsRawPath,
+          stdoutLogPath: join(
+            input.generationPath,
+            "logs",
+            `awards-${input.judge.id}.stdout.log`,
+          ),
+          stderrLogPath: join(
+            input.generationPath,
+            "logs",
+            `awards-${input.judge.id}.stderr.log`,
+          ),
+          timeoutMs: budget.timeoutMs,
+          maximumOutputTokens: budget.maximumOutputTokens,
+          candidates: awardsCandidates.map((candidate) => ({
+            anonymousCandidateId: candidate.anonymousCandidateId,
+            judgment: candidate.result.judgment,
+            sanitisedCssPath: join(awardsWorkspace, "candidate.css"),
+          })),
+        });
+        if (awards.status === "succeeded" && awards.awards === null) {
+          awards = {
+            ...awards,
+            status: "invalid",
+            error: "awards adapter reported success without awards data",
+          };
+        }
+        if (awards.status === "succeeded" && awards.awards !== null) {
+          const parsedAwards = createGenerationAwardsSchema(
+            validJudgmentResults.map((candidate) => candidate.anonymousCandidateId),
+          ).parse(awards.awards);
+          await writeJsonArtifact(
+            join(judgePath, "awards.json"),
+            GenerationAwardsSchema,
+            parsedAwards,
+          );
+        }
+        if (awards.rawOutput !== null || awards.status !== "succeeded") {
+          await archiveRawOutput(awardsRawPath, awards.rawOutput, awards.error);
+        }
+        if (awards.status !== "succeeded") {
+          judgeFailure = `awards task failed: ${boundedError(awards.error ?? "unknown error")}`;
+          await writePrivateFailure(join(judgePath, "failure.txt"), judgeFailure);
+        }
+        if (await regularFileExists(join(awardsWorkspace, "usage.json"))) {
+          const usageCopied = await copyDeclaredFile(
+            join(awardsWorkspace, "usage.json"),
+            join(judgePath, "usage", "awards.json"),
+            DEFAULT_USAGE_LIMIT_BYTES,
+          );
+          if (!usageCopied) {
+            throw new Error("awards usage metadata could not be archived");
+          }
+        }
+      } catch (error) {
+        awards = makeJudgeAdapterFailure(error);
+        await rm(join(judgePath, "awards.json"), { force: true }).catch(
+          () => undefined,
+        );
+        judgeFailure = `awards stage failed: ${boundedError(error)}`;
+        await writePrivateFailure(join(judgePath, "failure.txt"), judgeFailure);
+        await archiveRawOutput(awardsRawPath, null, judgeFailure).catch(
+          () => undefined,
+        );
+      } finally {
+        await removeWorkspace(awardsWorkspace);
+        const awardsCompleted = input.clock();
+        awardsTiming = {
+          startedAt: awardsStartedAt,
+          completedAt: timestamp(awardsCompleted),
+          durationMs: Math.max(0, awardsCompleted.getTime() - awardsStarted.getTime()),
+        };
+      }
+      if (input.resumable === true) {
+        if (awards === null) {
+          awards = makeJudgeAdapterFailure("awards task did not produce a result");
+        }
+        await finishTask(
+          input.generationPath,
+          input.generationId,
+          "awards",
+          awardsTaskTargetId,
+          awardsTaskStatus(awards),
+          input.clock,
+          awards.error,
+          null,
+        );
+        await notifyTask(input.afterTask, {
+          role: "awards",
+          targetId: awardsTaskTargetId,
+          taskId: taskIdentifier(input.generationId, "awards", awardsTaskTargetId),
+        });
+      }
     }
   }
   const taskTimingEntries: {
@@ -1687,6 +2911,46 @@ export async function runWaveB(options: WaveBRunOptions): Promise<WaveBRunResult
       renderCandidate(input, options.rendererOptions),
   };
   const contactSheetBuilder = options.contactSheetBuilder ?? buildAnonymousContactSheet;
+  if (options.resumable === true) {
+    await Promise.all(
+      contestants.flatMap((contestant) => [
+        ensurePendingTaskState(
+          generationPath,
+          manifest.generationId,
+          "contestant",
+          contestant.id,
+        ),
+        ensurePendingTaskState(
+          generationPath,
+          manifest.generationId,
+          "render",
+          contestant.id,
+        ),
+      ]),
+    );
+    await Promise.all(
+      judges.flatMap((judge) => [
+        ensurePendingTaskState(
+          generationPath,
+          manifest.generationId,
+          "awards",
+          judge.id,
+        ),
+        ...contestants.map((contestant) => {
+          const anonymousCandidateId = anonymousByContestant.get(contestant.id);
+          if (anonymousCandidateId === undefined) {
+            throw new Error(`anonymous map is missing ${contestant.id}`);
+          }
+          return ensurePendingTaskState(
+            generationPath,
+            manifest.generationId,
+            "judge",
+            `${judge.id}\0${anonymousCandidateId}`,
+          );
+        }),
+      ]),
+    );
+  }
   const contestantResults = await mapConcurrent(
     contestants,
     Math.min(4, contestantsConfig.defaults.concurrency),
@@ -1698,7 +2962,7 @@ export async function runWaveB(options: WaveBRunOptions): Promise<WaveBRunResult
         options.contestantAdapters?.get(contestant.id) ??
         options.contestantAdapterFactory?.(contestant) ??
         defaultContestantAdapter(options.repositoryRoot, contestant);
-      const result = await runOneContestant({
+      const contestantInput: RunContestantInput = {
         generationPath,
         generationId: manifest.generationId,
         contestant,
@@ -1709,8 +2973,13 @@ export async function runWaveB(options: WaveBRunOptions): Promise<WaveBRunResult
         canonicalState,
         adapter,
         renderer,
-      });
-      return result;
+      };
+      return options.resumable === true
+        ? runOneContestantResumable({
+            ...contestantInput,
+            options,
+          })
+        : runOneContestant(contestantInput);
     },
   );
   const canonicalFailure = contestantResults.find(
@@ -1746,8 +3015,21 @@ export async function runWaveB(options: WaveBRunOptions): Promise<WaveBRunResult
         randomBytes,
         adapter,
         contactSheetBuilder,
+        ...(options.resumable === undefined ? {} : { resumable: options.resumable }),
+        ...(options.afterTask === undefined ? {} : { afterTask: options.afterTask }),
       });
     } catch (error) {
+      if (error instanceof WaveBInterruptionError) throw error;
+      if (options.resumable === true) {
+        await markJudgeSetupFailure({
+          generationPath,
+          generationId: manifest.generationId,
+          judgeId: judge.id,
+          contestants: contestantResults,
+          clock,
+          reason: `judge stage failed: ${boundedError(error)}`,
+        });
+      }
       result = await makeJudgeFailureResult(generationPath, judge.id, error);
     }
     judgeResults.push(result);

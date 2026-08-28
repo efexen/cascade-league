@@ -193,7 +193,12 @@ describe("immutable generation creation", () => {
     const canonicalHashes = new Map(
       await Promise.all(
         canonicalFiles
-          .filter((file) => file !== "snapshot.json" && file !== "fallback.css")
+          .filter(
+            (file) =>
+              file !== "snapshot.json" &&
+              file !== "fallback.css" &&
+              file !== "source-archive.json",
+          )
           .map(
             async (file) =>
               [file, await sha256(join(generationPath, "challenge", file))] as const,

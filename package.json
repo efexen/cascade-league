@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@10.30.3",
   "engines": {
-    "node": "24.x"
+    "node": ">=22"
   },
   "scripts": {
     "garden": "tsx src/cli/garden.ts",
