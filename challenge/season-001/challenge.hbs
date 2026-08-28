@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=1440, initial-scale=1">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'"
+    >
+    <title>{{title}} — {{descriptor}}</title>
+    <link rel="stylesheet" href="{{stylesheetPath}}">
+  </head>
+  <body
+    id="local-maxima"
+    class="season-page"
+    data-season="{{seasonLabel}}"
+    data-generation="{{generationId}}"
+  >
+    <div class="page-shell">
+      <header id="masthead" class="masthead">
+        <p class="eyebrow">{{title}}</p>
+        <h1 class="site-title">{{descriptor}}</h1>
+        <p class="site-description">{{shortDescription}}</p>
+        <dl class="generation-meta">
+          <div><dt>Season</dt><dd>{{seasonId}}</dd></div>
+          <div><dt>Generation</dt><dd>{{generationId}}</dd></div>
+          <div><dt>Status</dt><dd><span
+                class="status-badge"
+              >{{statusBadge}}</span></dd></div>
+        </dl>
+      </header>
+
+      <main id="main-content" class="main-content">
+        <section
+          id="introduction"
+          class="introduction"
+          aria-labelledby="introduction-title"
+        >
+          <h2 id="introduction-title" class="section-title">{{headline}}</h2>
+          <p class="lede">{{introduction}}</p>
+          <blockquote class="central-question"><p>{{centralQuestion}}</p></blockquote>
+        </section>
+
+        <section id="rules" class="rules" aria-labelledby="rules-title">
+          <header class="section-header">
+            <p class="section-kicker">The contract</p>
+            <h2 id="rules-title" class="section-title">Five rules keep the experiment
+              honest.</h2>
+          </header>
+          <ol class="rules-list">
+            {{#each rules}}
+              <li class="rule">{{this}}</li>
+            {{/each}}
+          </ol>
+        </section>
+
+        <section
+          id="leaderboard"
+          class="leaderboard"
+          aria-labelledby="leaderboard-title"
+        >
+          <header class="section-header">
+            <p class="section-kicker">The current field</p>
+            <h2 id="leaderboard-title" class="section-title">Leaderboard</h2>
+          </header>
+          <ol class="leaderboard-grid">
+            {{#each entries}}
+              <li class="entry" data-rank="{{rank}}" data-status="{{status}}">
+                <article class="entry-card">
+                  <header class="entry-header">
+                    <p class="entry-rank">{{#if rank}}Rank
+                        {{rank}}{{else}}{{displayName}}{{/if}}</p>
+                    <h3 class="entry-title">{{displayName}}</h3>
+                    <p class="entry-identity"><span
+                        class="entry-harness"
+                      >{{harnessName}}</span>
+                      ·
+                      <span class="entry-model">{{modelName}}</span></p>
+                  </header>
+                  <figure class="entry-visual">
+                    <img
+                      class="entry-thumbnail"
+                      src="{{screenshotPath}}"
+                      alt="{{alt}}"
+                      width="1440"
+                      height="1200"
+                    >
+                    <figcaption class="entry-caption">{{statusLabel}}</figcaption>
+                  </figure>
+                  <dl class="entry-scores">
+                    <div><dt>Combined</dt><dd>{{combinedScoreLabel}}</dd></div>
+                    <div><dt>Originality</dt><dd>{{originalityScoreLabel}}</dd></div>
+                    <div><dt>Status</dt><dd>{{statusLabel}}</dd></div>
+                  </dl>
+                  <ul class="entry-awards">
+                    {{#each awards}}
+                      <li class="entry-award">{{label}}</li>
+                    {{/each}}
+                  </ul>
+                  <a class="entry-detail-link" href="#entry-detail-{{id}}">Read judge
+                    notes</a>
+                </article>
+              </li>
+            {{/each}}
+          </ol>
+        </section>
+
+        <section id="awards" class="awards" aria-labelledby="awards-title">
+          <header class="section-header">
+            <p class="section-kicker">What stood out</p>
+            <h2 id="awards-title" class="section-title">Emergent awards</h2>
+          </header>
+          {{#if awards}}
+            <ol class="awards-list">
+              {{#each awards}}
+                <li class="award">
+                  <h3 class="award-label">{{label}}</h3>
+                  <p class="award-winner">{{winningDisplayName}}
+                    ·
+                    {{judgeDisplayName}}</p>
+                  <p class="award-rationale">{{rationale}}</p>
+                </li>
+              {{/each}}
+            </ol>
+          {{else}}
+            <p class="empty-state">No emergent awards were issued for this field.</p>
+          {{/if}}
+        </section>
+
+        <section id="method" class="method" aria-labelledby="method-title">
+          <header class="section-header">
+            <p class="section-kicker">How it is measured</p>
+            <h2 id="method-title" class="section-title">A fixed canvas, a changing point
+              of view.</h2>
+          </header>
+          <p>{{method}}</p>
+        </section>
+
+        <section
+          id="judge-notes"
+          class="judge-notes"
+          aria-labelledby="judge-notes-title"
+        >
+          <header class="section-header">
+            <p class="section-kicker">The jury</p>
+            <h2 id="judge-notes-title" class="section-title">Judge notes</h2>
+          </header>
+          {{#each entries}}
+            <article id="entry-detail-{{id}}" class="entry-detail">
+              <header class="entry-detail-header">
+                <h3>{{displayName}}</h3>
+                <p>{{statusLabel}}</p>
+              </header>
+              {{#if judgeScores}}
+                <ol class="judge-note-list">
+                  {{#each judgeScores}}
+                    <li class="judge-note">
+                      <h4>{{judgeDisplayName}}</h4>
+                      <p class="judge-score">Total
+                        {{totalScore}}
+                        · Originality
+                        {{originalityScore}}</p>
+                      <p class="judge-critique">{{critique}}</p>
+                    </li>
+                  {{/each}}
+                </ol>
+              {{else}}
+                <p class="empty-state">No judge notes are available for this seed entry.</p>
+              {{/if}}
+            </article>
+          {{/each}}
+        </section>
+      </main>
+
+      <footer id="site-footer" class="site-footer">
+        <p>Generated
+          {{generationTimestamp}}
+          · Challenge
+          {{challengeVersion}}
+          · Rendering
+          {{renderingEnvironmentVersion}}</p>
+        <p>The complete implementation may be published later. Local Maxima is a static,
+          inspectable experiment.</p>
+      </footer>
+    </div>
+  </body>
+</html>

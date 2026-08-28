@@ -1,0 +1,39 @@
+/* Local challenge fonts. Contestants may replace the rest of this file. */
+@font-face {
+  font-family: "LM Neutral Sans";
+  src: url("fonts/lm-neutral-sans.ttf") format("truetype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "LM Display Sans";
+  src: url("fonts/lm-display-sans.ttf") format("truetype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "LM Readable Serif";
+  src: url("fonts/lm-readable-serif.ttf") format("truetype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "LM Expressive Serif";
+  src: url("fonts/lm-expressive-serif.ttf") format("truetype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "LM Mono";
+  src: url("fonts/lm-mono.ttf") format("truetype");
+  font-display: swap;
+}
+
+/* Major DOM hooks: #local-maxima, .page-shell, #masthead, #introduction,
+   #rules, #leaderboard, .entry-card, #awards, #method, #judge-notes,
+   #site-footer. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}

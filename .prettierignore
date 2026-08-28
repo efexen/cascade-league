@@ -1,0 +1,6 @@
+AGENTS.md
+local-maxima-planning/
+node_modules/
+generations/
+challenge/**/*.png
+challenge/season-001/challenge.hbs

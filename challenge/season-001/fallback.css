@@ -1,0 +1,319 @@
+@font-face {
+  font-family: "LM Neutral Sans";
+  src: url("fonts/lm-neutral-sans.ttf") format("truetype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "LM Mono";
+  src: url("fonts/lm-mono.ttf") format("truetype");
+  font-display: swap;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: #f7f7f5;
+  color: #1d1d1b;
+  font-family: "LM Neutral Sans", sans-serif;
+}
+
+body {
+  margin: 0;
+}
+
+.page-shell {
+  margin: 0 auto;
+  max-width: 1180px;
+  padding: 48px 32px 80px;
+}
+
+.masthead,
+.introduction,
+.rules,
+.leaderboard,
+.awards,
+.method,
+.judge-notes,
+.site-footer {
+  border-top: 1px solid currentColor;
+  padding-top: 20px;
+}
+
+.masthead {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr 2fr;
+}
+
+.masthead > * {
+  margin: 0;
+}
+
+.eyebrow,
+.section-kicker,
+.entry-rank,
+.entry-caption,
+.entry-scores dt,
+.entry-detail-header p,
+.judge-score,
+.site-footer {
+  font-family: "LM Mono", monospace;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.site-title {
+  font-size: clamp(42px, 7vw, 84px);
+  grid-column: 1 / -1;
+  line-height: 0.95;
+  margin: 24px 0 8px;
+}
+
+.site-description {
+  font-size: 20px;
+  max-width: 34ch;
+}
+
+.generation-meta {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 0;
+}
+
+.generation-meta div,
+.entry-scores div {
+  border-left: 1px solid currentColor;
+  padding-left: 10px;
+}
+
+.generation-meta dt,
+.generation-meta dd,
+.entry-scores dt,
+.entry-scores dd {
+  margin: 0;
+}
+
+.generation-meta dd,
+.entry-scores dd {
+  font-size: 20px;
+  margin-top: 4px;
+}
+
+.main-content {
+  display: grid;
+  gap: 64px;
+  margin-top: 64px;
+}
+
+.section-header {
+  align-items: baseline;
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+}
+
+.section-title {
+  font-size: 32px;
+  margin: 0;
+}
+
+.section-kicker {
+  margin: 0;
+}
+
+.lede,
+.method > p {
+  font-size: 24px;
+  line-height: 1.3;
+  max-width: 44ch;
+}
+
+.central-question {
+  border-left: 4px solid currentColor;
+  font-size: 28px;
+  margin: 36px 0 0;
+  max-width: 28ch;
+  padding-left: 20px;
+}
+
+.rules-list {
+  display: grid;
+  gap: 12px;
+  list-style-position: inside;
+  margin: 24px 0 0;
+  padding: 0;
+}
+
+.rule {
+  border-bottom: 1px solid currentColor;
+  font-size: 18px;
+  padding: 12px 0;
+}
+
+.leaderboard-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(3, 1fr);
+  list-style: none;
+  margin: 24px 0 0;
+  padding: 0;
+}
+
+.entry-card {
+  border: 1px solid currentColor;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.entry-header h3,
+.entry-header p,
+.entry-detail-header h3,
+.entry-detail-header p,
+.entry-awards,
+.entry-visual,
+.entry-scores {
+  margin: 0;
+}
+
+.entry-title {
+  font-size: 24px;
+  margin-top: 8px;
+}
+
+.entry-identity {
+  font-size: 14px;
+  margin-top: 4px;
+}
+
+.entry-visual {
+  background: #e5e5e1;
+  overflow: hidden;
+}
+
+.entry-thumbnail {
+  aspect-ratio: 6 / 5;
+  display: block;
+  height: auto;
+  object-fit: cover;
+  width: 100%;
+}
+
+.entry-caption {
+  padding: 8px;
+}
+
+.entry-scores {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.entry-scores dd {
+  font-size: 16px;
+}
+
+.entry-awards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  padding: 0;
+}
+
+.entry-award {
+  border: 1px solid currentColor;
+  font-size: 12px;
+  padding: 4px 6px;
+}
+
+.entry-detail-link {
+  color: inherit;
+  font-size: 14px;
+}
+
+.awards-list {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, 1fr);
+  list-style: none;
+  margin: 24px 0 0;
+  padding: 0;
+}
+
+.award {
+  border: 1px solid currentColor;
+  padding: 16px;
+}
+
+.award h3,
+.award p {
+  margin: 0;
+}
+
+.award-winner,
+.award-rationale {
+  margin-top: 12px !important;
+}
+
+.entry-detail {
+  border-top: 1px solid currentColor;
+  margin-top: 24px;
+  padding-top: 16px;
+}
+
+.entry-detail-header {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+}
+
+.judge-note-list {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, 1fr);
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+}
+
+.judge-note {
+  border-left: 2px solid currentColor;
+  padding-left: 12px;
+}
+
+.judge-note h4,
+.judge-note p {
+  margin: 0;
+}
+
+.judge-critique {
+  line-height: 1.4;
+  margin-top: 8px !important;
+  max-width: 60ch;
+}
+
+.empty-state {
+  border: 1px dashed currentColor;
+  margin: 24px 0 0;
+  padding: 16px;
+}
+
+.site-footer {
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+  margin-top: 64px;
+}
+
+.site-footer p {
+  margin: 0;
+  max-width: 60ch;
+}
