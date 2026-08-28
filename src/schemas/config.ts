@@ -37,11 +37,13 @@ export const ContestantCommandPlaceholders = [
 ] as const;
 
 export const JudgeCommandPlaceholders = [
-  ...ContestantCommandPlaceholders,
+  "{workspacePath}",
+  "{promptPath}",
   "{candidateScreenshotPath}",
   "{contactSheetPath}",
   "{sanitisedCssPath}",
   "{judgmentPath}",
+  "{usageOutputPath}",
   "{judgmentSummaryPath}",
   "{awardsPath}",
 ] as const;
@@ -233,7 +235,7 @@ export const ContestantsConfigSchema = z
         timeoutMs: PositiveIntegerSchema,
         maximumTotalTokens: PositiveIntegerSchema,
         maximumSubmissionBytes: PositiveIntegerSchema.max(61440),
-        concurrency: PositiveIntegerSchema,
+        concurrency: PositiveIntegerSchema.max(4),
       })
       .strict(),
     contestants: z.array(ContestantSchema).min(2).max(6),
@@ -268,7 +270,7 @@ export const JudgesConfigSchema = z
       .object({
         timeoutMs: PositiveIntegerSchema,
         maximumOutputTokens: PositiveIntegerSchema,
-        concurrencyPerJudge: PositiveIntegerSchema,
+        concurrencyPerJudge: PositiveIntegerSchema.max(2),
       })
       .strict(),
     judges: z.array(JudgeSchema).min(1),

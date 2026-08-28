@@ -1,0 +1,1207 @@
+import {
+  appendFile,
+  chmod,
+  cp,
+  mkdir,
+  readFile,
+  readdir,
+  truncate,
+  writeFile,
+} from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import sharp from "sharp";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+
+import { createGeneration } from "../../src/artifacts/generation.js";
+import {
+  CommandContestantAdapter,
+  FixtureContestantAdapter,
+  type ContestantAdapter,
+} from "../../src/contestants/index.js";
+import {
+  buildAnonymousContactSheet,
+  FixtureJudgeAdapter,
+} from "../../src/judging/index.js";
+import { runWaveB } from "../../src/orchestration/wave-b.js";
+import {
+  CandidateJudgmentSchema,
+  ContactSheetOrderSchema,
+  GenerationAwardsSchema,
+  JudgeAssessmentOrderSchema,
+  JudgeSummarySchema,
+  JudgeTaskTimingsSchema,
+  ManifestSchema,
+  RunSchema,
+  ValidationSchema,
+} from "../../src/schemas/index.js";
+import type { JudgeAdapter } from "../../src/judging/index.js";
+
+const repositoryRoot = new URL("../../", import.meta.url).pathname;
+
+describe("Wave-B fixture orchestration", () => {
+  it("honors contestant and per-judge concurrency while preserving stored order", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-concurrency-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    const fixtureContestant = new FixtureContestantAdapter({
+      fixtureRoot: join(repositoryRoot, "test/fixtures/contestants"),
+      delayMs: 20,
+    });
+    let activeContestants = 0;
+    let maximumContestants = 0;
+    const contestantAdapter: ContestantAdapter = {
+      run: async (input) => {
+        activeContestants += 1;
+        maximumContestants = Math.max(maximumContestants, activeContestants);
+        try {
+          return await fixtureContestant.run(input);
+        } finally {
+          activeContestants -= 1;
+        }
+      },
+    };
+    const fixtureJudge = new FixtureJudgeAdapter({ delayMs: 20 });
+    let activeAssessments = 0;
+    let maximumAssessments = 0;
+    const judgeAdapter: JudgeAdapter = {
+      scoreCandidate: async (input) => {
+        activeAssessments += 1;
+        maximumAssessments = Math.max(maximumAssessments, activeAssessments);
+        try {
+          return await fixtureJudge.scoreCandidate(input);
+        } finally {
+          activeAssessments -= 1;
+        }
+      },
+      createAwards: (input) => fixtureJudge.createAwards(input),
+    };
+
+    const result = await runWaveB({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      seasonId: "0001",
+      contestantAdapters: new Map(
+        ["fixture-editorial", "fixture-geometric", "fixture-generic"].map((id) => [
+          id,
+          contestantAdapter,
+        ]),
+      ),
+      judgeAdapters: new Map([
+        ["fixture-critic-a", judgeAdapter],
+        ["fixture-critic-b", judgeAdapter],
+      ]),
+    });
+
+    expect(maximumContestants).toBeGreaterThan(1);
+    expect(maximumContestants).toBeLessThanOrEqual(4);
+    expect(maximumAssessments).toBe(2);
+    expect(result.contestants.map((entry) => entry.contestantId)).toEqual([
+      "fixture-editorial",
+      "fixture-geometric",
+      "fixture-generic",
+    ]);
+    for (const judge of result.judges) {
+      expect(judge.candidates.map((entry) => entry.anonymousCandidateId)).toEqual(
+        judge.assessmentOrder,
+      );
+    }
+  }, 30000);
+
+  it("runs the complete fixture Wave-B path with anonymous stored judge artifacts", async () => {
+    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-wave-b-"));
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+
+    let clockTick = 0;
+    const result = await runWaveB({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      generationsRoot,
+      seasonId: "0001",
+      clock: () => new Date(Date.parse("2026-08-28T20:00:00.000Z") + clockTick++ * 10),
+    });
+
+    expect(result.generationPath).toBe(generation.generationPath);
+    expect(result.contestants).toHaveLength(3);
+    expect(
+      new Set(result.contestants.map((contestant) => contestant.run.startedAt)).size,
+    ).toBe(3);
+    for (const contestant of result.contestants) {
+      const run = RunSchema.parse(
+        JSON.parse(
+          await readFile(join(contestant.path, "run.json"), "utf8"),
+        ) as unknown,
+      );
+      const validation = ValidationSchema.parse(
+        JSON.parse(
+          await readFile(join(contestant.path, "validation.json"), "utf8"),
+        ) as unknown,
+      );
+      expect(run.status).toBe("succeeded");
+      expect(run.attemptCount).toBe(1);
+      expect(Date.parse(run.completedAt!) - Date.parse(run.startedAt!)).toBe(
+        run.durationMs,
+      );
+      expect(validation.status).toBe("valid");
+      const image = await sharp(join(contestant.path, "screenshot.png")).metadata();
+      expect(image.width).toBe(1440);
+      expect(image.height).toBe(1200);
+      await expect(readdir(join(contestant.path, "workspace"))).rejects.toThrow();
+      expect(await readFile(join(contestant.path, "prompt.md"), "utf8")).toContain(
+        join(contestant.path, "workspace/submission.css"),
+      );
+    }
+    expect(result.judges).toHaveLength(2);
+    const executionOrder = result.contestants.map(
+      (contestant) => contestant.anonymousCandidateId,
+    );
+    for (const judge of result.judges) {
+      const contactOrder = ContactSheetOrderSchema.parse(
+        JSON.parse(
+          await readFile(join(judge.path, "contact-sheet-order.json"), "utf8"),
+        ) as unknown,
+      );
+      const assessmentOrder = JudgeAssessmentOrderSchema.parse(
+        JSON.parse(
+          await readFile(join(judge.path, "assessment-order.json"), "utf8"),
+        ) as unknown,
+      );
+      expect(
+        await sharp(join(judge.path, "contact-sheet.png")).metadata(),
+      ).toMatchObject({
+        format: "png",
+        width: 1600,
+        height: 900,
+      });
+      expect(contactOrder.candidateOrder).toHaveLength(3);
+      expect(assessmentOrder.assessmentOrder).toEqual(judge.assessmentOrder);
+      expect(assessmentOrder.assessmentOrder).not.toEqual(executionOrder);
+      expect(contactOrder.candidateOrder).not.toEqual(executionOrder);
+      expect(judge.candidates).toHaveLength(3);
+      expect(
+        new Set(judge.candidates.map((candidate) => candidate.startedAt)).size,
+      ).toBe(3);
+      for (const candidate of judge.candidates) {
+        expect(
+          Date.parse(candidate.completedAt) - Date.parse(candidate.startedAt),
+        ).toBe(candidate.durationMs);
+      }
+      expect(judge.awardsTiming).not.toBeNull();
+      expect(
+        Date.parse(judge.awardsTiming!.completedAt) -
+          Date.parse(judge.awardsTiming!.startedAt),
+      ).toBe(judge.awardsTiming!.durationMs);
+      for (const candidate of judge.candidates) {
+        expect(candidate.result.status).toBe("succeeded");
+        expect(candidate.result.response).not.toHaveProperty("modelUsage");
+        expect(candidate.durablePath).not.toBeNull();
+        const judgment = CandidateJudgmentSchema.parse(
+          JSON.parse(await readFile(candidate.durablePath!, "utf8")) as unknown,
+        );
+        expect(judgment.judgeId).toBe(judge.judgeId);
+        expect(
+          judgment.critique.split(/[.!?]+/u).filter((part) => part.trim()),
+        ).toHaveLength(2);
+        const prompt = await readFile(
+          join(judge.path, "prompts", `${candidate.anonymousCandidateId}.md`),
+          "utf8",
+        );
+        expect(prompt).not.toContain("modelUsage");
+        expect(prompt).not.toContain("Fixture Harness");
+        expect(prompt).not.toContain("local-fixture");
+        expect(prompt).not.toContain("editorial-model");
+        await expect(
+          readdir(join(judge.path, "workspaces", candidate.anonymousCandidateId)),
+        ).rejects.toThrow();
+      }
+      const summary = JudgeSummarySchema.parse(
+        JSON.parse(
+          await readFile(join(judge.path, "judgment-summary.json"), "utf8"),
+        ) as unknown,
+      );
+      expect(summary.entries).toHaveLength(3);
+      const taskTimings = JudgeTaskTimingsSchema.parse(
+        JSON.parse(
+          await readFile(join(judge.path, "task-timings.json"), "utf8"),
+        ) as unknown,
+      );
+      expect(taskTimings.tasks).toHaveLength(4);
+      const judgeVisibleFiles = [
+        await readFile(join(judge.path, "awards-prompt.md"), "utf8"),
+        ...(await Promise.all(
+          judge.candidates.map(async (candidate) => {
+            return [
+              await readFile(
+                join(judge.path, "prompts", `${candidate.anonymousCandidateId}.md`),
+                "utf8",
+              ),
+              candidate.result.rawOutput ?? "",
+              candidate.durablePath === null
+                ? ""
+                : await readFile(candidate.durablePath, "utf8"),
+            ];
+          }),
+        )),
+      ].flat(2);
+      for (const visibleFile of judgeVisibleFiles) {
+        expect(visibleFile).not.toContain("fixture-editorial");
+        expect(visibleFile).not.toContain("fixture-geometric");
+        expect(visibleFile).not.toContain("fixture-generic");
+        expect(visibleFile).not.toContain("Fixture Harness");
+        expect(visibleFile).not.toContain("local-fixture");
+        expect(visibleFile).not.toContain("editorial-model");
+        expect(visibleFile).not.toContain("geometric-model");
+        expect(visibleFile).not.toContain("generic-model");
+      }
+      const awards = GenerationAwardsSchema.parse(
+        JSON.parse(await readFile(join(judge.path, "awards.json"), "utf8")) as unknown,
+      );
+      expect(awards.awards.length).toBeLessThanOrEqual(3);
+      expect(judge.awards?.status).toBe("succeeded");
+      expect(
+        await readFile(join(judge.path, "awards-prompt.md"), "utf8"),
+      ).not.toContain("Fixture Critic");
+      expect(
+        await readFile(join(judge.path, "awards-prompt.md"), "utf8"),
+      ).not.toContain("fixture-editorial");
+    }
+    await expect(
+      readFile(join(generation.generationPath, "leaderboard.json")),
+    ).rejects.toThrow();
+    await expect(
+      readFile(join(generation.generationPath, "public/index.html")),
+    ).rejects.toThrow();
+    const manifest = ManifestSchema.parse(
+      JSON.parse(
+        await readFile(join(generation.generationPath, "manifest.json"), "utf8"),
+      ) as unknown,
+    );
+    expect(manifest.status).toBe("judging_complete");
+  }, 30000);
+
+  it("isolates static, execution, timeout, and render failures and judges only rendered candidates", async () => {
+    const mirrorRoot = await mkdtemp(join(tmpdir(), "local-maxima-wave-b-mixed-repo-"));
+    await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
+      recursive: true,
+    });
+    await mkdir(join(mirrorRoot, "config"), { recursive: true });
+    const contestantsConfig = parseYaml(
+      await readFile(join(repositoryRoot, "config/contestants.yaml"), "utf8"),
+    ) as {
+      schemaVersion: number;
+      defaults: Record<string, unknown>;
+      contestants: Record<string, unknown>[];
+    };
+    const baseContestant = contestantsConfig.contestants[0]!;
+    contestantsConfig.defaults.timeoutMs = 5;
+    const fixtures = [
+      ["mixed-valid", "editorial"],
+      ["mixed-remote", "invalid-remote"],
+      ["mixed-no-submission", "no-submission"],
+      ["mixed-failure", "failure"],
+      ["mixed-timeout", "timeout"],
+      ["mixed-render-failure", "render-failure"],
+    ] as const;
+    contestantsConfig.contestants = fixtures.map(([id, fixture]) => ({
+      ...baseContestant,
+      id,
+      displayName: `Mixed ${id}`,
+      harness: {
+        name: "fixture-harness",
+        version: "1.0.0",
+        adapter: "fixture",
+        fixture,
+      },
+      model: {
+        provider: "local-fixture",
+        name: `${id}-model`,
+        version: "1.0.0",
+      },
+      budget: { timeoutMs: 5, maximumTotalTokens: 100 },
+      enabled: true,
+    }));
+    await writeFile(
+      join(mirrorRoot, "config/contestants.yaml"),
+      stringifyYaml(contestantsConfig),
+      "utf8",
+    );
+    await writeFile(
+      join(mirrorRoot, "config/judges.yaml"),
+      await readFile(join(repositoryRoot, "config/judges.yaml")),
+    );
+
+    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-wave-b-mixed-"));
+    const generation = await createGeneration({
+      repositoryRoot: mirrorRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    const fixtureAdapter = new FixtureContestantAdapter({
+      fixtureRoot: join(repositoryRoot, "test/fixtures/contestants"),
+      delayMs: 1,
+    });
+    const result = await runWaveB({
+      repositoryRoot: mirrorRoot,
+      generationPath: generation.generationPath,
+      contestantAdapterFactory: (contestant) => ({
+        run: (input) =>
+          fixtureAdapter.run({
+            ...input,
+            contestant: {
+              ...contestant,
+              harness:
+                contestant.harness.adapter === "fixture"
+                  ? {
+                      ...contestant.harness,
+                      fixture: fixtures.find(([id]) => id === contestant.id)![1],
+                    }
+                  : contestant.harness,
+            },
+          }),
+      }),
+    });
+
+    expect(
+      result.contestants.map((contestant) => contestant.validation.status),
+    ).toEqual(["valid", "invalid", "invalid", "invalid", "invalid", "render_failed"]);
+    expect(result.contestants.map((contestant) => contestant.run.status)).toEqual([
+      "succeeded",
+      "succeeded",
+      "missing_submission",
+      "failed",
+      "timeout",
+      "succeeded",
+    ]);
+    for (const judge of result.judges) {
+      expect(judge.assessmentOrder).toHaveLength(1);
+      expect(judge.candidates).toHaveLength(1);
+      expect(judge.candidates[0]?.result.status).toBe("succeeded");
+      expect(judge.awards?.status).toBe("succeeded");
+      expect(judge.awards?.awards?.awards).toEqual([]);
+    }
+    await expect(readdir(join(result.judges[0]!.path, "workspaces"))).rejects.toThrow();
+  }, 30000);
+
+  it("archives an invalid judge response and continues the other judge without awards", async () => {
+    const mirrorRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-invalid-judge-repo-"),
+    );
+    await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
+      recursive: true,
+    });
+    await mkdir(join(mirrorRoot, "config"), { recursive: true });
+    await writeFile(
+      join(mirrorRoot, "config/contestants.yaml"),
+      await readFile(join(repositoryRoot, "config/contestants.yaml")),
+    );
+    const judgesConfig = parseYaml(
+      await readFile(join(repositoryRoot, "config/judges.yaml"), "utf8"),
+    ) as { judges: Record<string, unknown>[]; [key: string]: unknown };
+    judgesConfig.judges[0] = {
+      ...judgesConfig.judges[0],
+      harness: {
+        name: "fixture-judge",
+        version: "1.0.0",
+        adapter: "fixture",
+        fixture: "invalid-json",
+      },
+    };
+    await writeFile(
+      join(mirrorRoot, "config/judges.yaml"),
+      stringifyYaml(judgesConfig),
+      "utf8",
+    );
+
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-invalid-judge-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot: mirrorRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    const contestantAdapter = new FixtureContestantAdapter({
+      fixtureRoot: join(repositoryRoot, "test/fixtures/contestants"),
+      delayMs: 1,
+    });
+    const result = await runWaveB({
+      repositoryRoot: mirrorRoot,
+      generationPath: generation.generationPath,
+      contestantAdapters: new Map(
+        ["fixture-editorial", "fixture-geometric", "fixture-generic"].map((id) => [
+          id,
+          contestantAdapter,
+        ]),
+      ),
+    });
+
+    const invalidJudge = result.judges.find(
+      (judge) => judge.judgeId === "fixture-critic-a",
+    )!;
+    expect(invalidJudge.candidates).toHaveLength(3);
+    expect(
+      invalidJudge.candidates.every(
+        (candidate) => candidate.result.status === "invalid",
+      ),
+    ).toBe(true);
+    expect(invalidJudge.awards).toBeNull();
+    expect(
+      await readFile(
+        join(
+          invalidJudge.path,
+          "raw",
+          `${invalidJudge.candidates[0]!.anonymousCandidateId}.json`,
+        ),
+        "utf8",
+      ),
+    ).toBe("{ this is not valid judge JSON");
+    await expect(
+      readFile(join(invalidJudge.path, "awards-prompt.md")),
+    ).rejects.toThrow();
+    await expect(
+      readFile(join(invalidJudge.path, "judgment-summary.json")),
+    ).rejects.toThrow();
+
+    const validJudge = result.judges.find(
+      (judge) => judge.judgeId === "fixture-critic-b",
+    )!;
+    expect(validJudge.candidates).toHaveLength(3);
+    expect(
+      validJudge.candidates.every(
+        (candidate) => candidate.result.status === "succeeded",
+      ),
+    ).toBe(true);
+    expect(validJudge.awards?.status).toBe("succeeded");
+    expect(
+      ManifestSchema.parse(
+        JSON.parse(
+          await readFile(join(generation.generationPath, "manifest.json"), "utf8"),
+        ) as unknown,
+      ).status,
+    ).toBe("judging_complete");
+  }, 30000);
+
+  it("collects only declared command outputs from a contestant workspace", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-command-collection-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    const scriptPath = join(generationsRoot, "contestant.mjs");
+    const editorialCss = await readFile(
+      join(repositoryRoot, "test/fixtures/contestants/editorial.css"),
+      "utf8",
+    );
+    await writeFile(
+      scriptPath,
+      [
+        'import { writeFileSync } from "node:fs";',
+        `writeFileSync(process.argv[2], ${JSON.stringify(editorialCss)});`,
+        "writeFileSync(process.argv[3], JSON.stringify({ inputTokens: 2, outputTokens: 3, totalTokens: 5 }));",
+        'writeFileSync("uncollected-output.txt", "must stay private\\n");',
+      ].join("\n"),
+      "utf8",
+    );
+    const fixtureAdapter = new FixtureContestantAdapter({
+      fixtureRoot: join(repositoryRoot, "test/fixtures/contestants"),
+      delayMs: 1,
+    });
+    const commandAdapter = new CommandContestantAdapter();
+    const result = await runWaveB({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      contestantAdapterFactory: (contestant) => {
+        if (contestant.id !== "fixture-editorial") return fixtureAdapter;
+        return {
+          run: (input) =>
+            commandAdapter.run({
+              ...input,
+              contestant: {
+                ...contestant,
+                harness: {
+                  name: "command-fixture",
+                  version: "1.0.0",
+                  adapter: "command",
+                  command: {
+                    argv: [
+                      process.execPath,
+                      scriptPath,
+                      "{submissionPath}",
+                      "{usageOutputPath}",
+                    ],
+                    environmentAllowlist: [],
+                  },
+                },
+              },
+            }),
+        };
+      },
+    });
+    const commandContestant = result.contestants.find(
+      (contestant) => contestant.contestantId === "fixture-editorial",
+    )!;
+    expect(commandContestant.run.status).toBe("succeeded");
+    expect(commandContestant.validation.status).toBe("valid");
+    expect(
+      await readFile(join(commandContestant.path, "submission.css"), "utf8"),
+    ).toContain("--fixture-style: editorial");
+    await expect(
+      readFile(join(commandContestant.path, "uncollected-output.txt")),
+    ).rejects.toThrow();
+    await expect(
+      readFile(
+        join(commandContestant.path, "workspace/uncollected-output.txt"),
+        "utf8",
+      ),
+    ).rejects.toThrow();
+    await expect(readdir(join(commandContestant.path, "workspace"))).rejects.toThrow();
+  }, 30000);
+
+  it("does not copy an oversized declared usage file after a bounded read", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-usage-cap-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    const scriptPath = join(generationsRoot, "oversized-usage-contestant.mjs");
+    const editorialCss = await readFile(
+      join(repositoryRoot, "test/fixtures/contestants/editorial.css"),
+      "utf8",
+    );
+    await writeFile(
+      scriptPath,
+      [
+        'import { truncateSync, writeFileSync } from "node:fs";',
+        `writeFileSync(process.argv[2], ${JSON.stringify(editorialCss)});`,
+        'writeFileSync(process.argv[3], "");',
+        "truncateSync(process.argv[3], 2 * 1024 * 1024);",
+      ].join("\n"),
+      "utf8",
+    );
+    const fixtureAdapter = new FixtureContestantAdapter({
+      fixtureRoot: join(repositoryRoot, "test/fixtures/contestants"),
+      delayMs: 1,
+    });
+    const commandAdapter = new CommandContestantAdapter();
+    const result = await runWaveB({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      contestantAdapterFactory: (contestant) => {
+        if (contestant.id !== "fixture-editorial") return fixtureAdapter;
+        return {
+          run: (input) =>
+            commandAdapter.run({
+              ...input,
+              contestant: {
+                ...contestant,
+                harness: {
+                  name: "oversized-usage-command",
+                  version: "1.0.0",
+                  adapter: "command",
+                  command: {
+                    argv: [
+                      process.execPath,
+                      scriptPath,
+                      "{submissionPath}",
+                      "{usageOutputPath}",
+                    ],
+                    environmentAllowlist: [],
+                  },
+                },
+              },
+            }),
+        };
+      },
+    });
+
+    const commandContestant = result.contestants.find(
+      (contestant) => contestant.contestantId === "fixture-editorial",
+    )!;
+    expect(commandContestant.run.status).toBe("failed");
+    expect(commandContestant.validation.status).toBe("invalid");
+    await expect(
+      readFile(join(commandContestant.path, "usage.json")),
+    ).rejects.toThrow();
+  }, 30000);
+
+  it("does not mark a judge candidate successful when usage archival is oversized", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-judge-usage-cap-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    const fixtureJudge = new FixtureJudgeAdapter();
+    const oversizedJudge: JudgeAdapter = {
+      scoreCandidate: async (input) => {
+        const result = await fixtureJudge.scoreCandidate(input);
+        await writeFile(input.usageOutputPath, "", "utf8");
+        await truncate(input.usageOutputPath, 2 * 1024 * 1024);
+        return result;
+      },
+      createAwards: (input) => fixtureJudge.createAwards(input),
+    };
+
+    const result = await runWaveB({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      judgeAdapters: new Map([["fixture-critic-a", oversizedJudge]]),
+    });
+    const failedJudge = result.judges.find(
+      (judge) => judge.judgeId === "fixture-critic-a",
+    )!;
+    expect(
+      failedJudge.candidates.some((candidate) => candidate.result.status === "failed"),
+    ).toBe(true);
+    expect(failedJudge.awards).toBeNull();
+    expect(failedJudge.failure).toMatch(/usage|collect|archive/i);
+    expect(
+      result.judges.find((judge) => judge.judgeId === "fixture-critic-b")?.awards
+        ?.status,
+    ).toBe("succeeded");
+  }, 30000);
+
+  it("records a bounded awards failure and continues the other judge", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-awards-failure-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    const fixtureJudge = new FixtureJudgeAdapter();
+    const awardsFailure: JudgeAdapter = {
+      scoreCandidate: (input) => fixtureJudge.scoreCandidate(input),
+      createAwards: async () => ({
+        status: "failed" as const,
+        awards: null,
+        rawOutput: null,
+        usage: {
+          inputTokens: null,
+          outputTokens: null,
+          totalTokens: null,
+          estimatedCostUsd: null,
+        },
+        error: "injected awards failure",
+        timedOut: false,
+        attemptCount: 1 as const,
+      }),
+    };
+
+    const result = await runWaveB({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      judgeAdapters: new Map([["fixture-critic-a", awardsFailure]]),
+    });
+    const failedJudge = result.judges.find(
+      (judge) => judge.judgeId === "fixture-critic-a",
+    )!;
+    expect(failedJudge.awards?.status).toBe("failed");
+    expect(failedJudge.failure).toMatch(/awards|injected/i);
+    expect(await readFile(join(failedJudge.path, "failure.txt"), "utf8")).toMatch(
+      /awards|injected/i,
+    );
+    expect(
+      result.judges.find((judge) => judge.judgeId === "fixture-critic-b")?.awards
+        ?.status,
+    ).toBe("succeeded");
+  }, 30000);
+
+  it("isolates one candidate assessment failure while later candidates continue", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-candidate-failure-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    const fixtureJudge = new FixtureJudgeAdapter();
+    let injected = false;
+    const candidateFailure: JudgeAdapter = {
+      scoreCandidate: async (input) => {
+        if (!injected) {
+          injected = true;
+          throw new Error("injected candidate assessment failure");
+        }
+        return fixtureJudge.scoreCandidate(input);
+      },
+      createAwards: (input) => fixtureJudge.createAwards(input),
+    };
+
+    const result = await runWaveB({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      judgeAdapters: new Map([["fixture-critic-a", candidateFailure]]),
+    });
+    const failedJudge = result.judges.find(
+      (judge) => judge.judgeId === "fixture-critic-a",
+    )!;
+    expect(failedJudge.candidates).toHaveLength(3);
+    expect(
+      failedJudge.candidates.filter(
+        (candidate) => candidate.result.status === "failed",
+      ),
+    ).toHaveLength(1);
+    expect(
+      failedJudge.candidates.filter(
+        (candidate) => candidate.result.status === "succeeded",
+      ),
+    ).toHaveLength(2);
+    expect(failedJudge.awards).toBeNull();
+    expect(
+      result.judges.find((judge) => judge.judgeId === "fixture-critic-b")?.awards
+        ?.status,
+    ).toBe("succeeded");
+  }, 30000);
+
+  it("rejects a contestant that modifies its challenge HTML or font workspace", async () => {
+    const mirrorRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-input-tamper-repo-"),
+    );
+    await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
+      recursive: true,
+    });
+    await mkdir(join(mirrorRoot, "config"), { recursive: true });
+    const contestantsConfig = parseYaml(
+      await readFile(join(repositoryRoot, "config/contestants.yaml"), "utf8"),
+    ) as { defaults: Record<string, unknown>; contestants: Record<string, unknown>[] };
+    contestantsConfig.defaults.concurrency = 1;
+    contestantsConfig.contestants[0]!.harness = {
+      name: "tampering-command",
+      version: "1.0.0",
+      adapter: "command",
+      command: {
+        argv: [
+          process.execPath,
+          join(mirrorRoot, "tamper.mjs"),
+          "{workspacePath}",
+          "{submissionPath}",
+        ],
+        environmentAllowlist: [],
+      },
+    };
+    await writeFile(
+      join(mirrorRoot, "config/contestants.yaml"),
+      stringifyYaml(contestantsConfig),
+      "utf8",
+    );
+    await writeFile(
+      join(mirrorRoot, "config/judges.yaml"),
+      await readFile(join(repositoryRoot, "config/judges.yaml")),
+    );
+    await writeFile(
+      join(mirrorRoot, "tamper.mjs"),
+      [
+        'import { appendFileSync, chmodSync, writeFileSync } from "node:fs";',
+        'import { join } from "node:path";',
+        'chmodSync(join(process.argv[2], "challenge.html"), 0o644);',
+        'chmodSync(join(process.argv[2], "fonts/lm-mono.ttf"), 0o644);',
+        'appendFileSync(join(process.argv[2], "challenge.html"), "\\n<!-- tampered -->\\n");',
+        'appendFileSync(join(process.argv[2], "fonts/lm-mono.ttf"), "tampered");',
+        'writeFileSync(process.argv[3], "body { color: red; }\\n");',
+      ].join("\n"),
+      "utf8",
+    );
+
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-input-tamper-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot: mirrorRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+
+    const result = await runWaveB({
+      repositoryRoot: mirrorRoot,
+      generationPath: generation.generationPath,
+      contestantAdapters: new Map(
+        ["fixture-geometric", "fixture-generic"].map((id) => [
+          id,
+          new FixtureContestantAdapter({
+            fixtureRoot: join(repositoryRoot, "test/fixtures/contestants"),
+          }),
+        ]),
+      ),
+    });
+    const tampered = result.contestants.find(
+      (contestant) => contestant.contestantId === "fixture-editorial",
+    )!;
+    expect(tampered.validation.status).toBe("invalid");
+    expect(tampered.screenshotPath).toBeNull();
+  }, 30000);
+
+  it("stops before accepting a screenshot when a harness tampers with canonical challenge inputs", async () => {
+    const mirrorRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-canonical-tamper-repo-"),
+    );
+    await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
+      recursive: true,
+    });
+    await mkdir(join(mirrorRoot, "config"), { recursive: true });
+    const contestantsConfig = parseYaml(
+      await readFile(join(repositoryRoot, "config/contestants.yaml"), "utf8"),
+    ) as { defaults: Record<string, unknown>; contestants: Record<string, unknown>[] };
+    contestantsConfig.defaults.concurrency = 1;
+    contestantsConfig.contestants[0]!.harness = {
+      name: "canonical-tampering-command",
+      version: "1.0.0",
+      adapter: "command",
+      command: {
+        argv: [
+          process.execPath,
+          join(mirrorRoot, "tamper-canonical.mjs"),
+          "{workspacePath}",
+          "{submissionPath}",
+        ],
+        environmentAllowlist: [],
+      },
+    };
+    await writeFile(
+      join(mirrorRoot, "config/contestants.yaml"),
+      stringifyYaml(contestantsConfig),
+      "utf8",
+    );
+    await writeFile(
+      join(mirrorRoot, "config/judges.yaml"),
+      await readFile(join(repositoryRoot, "config/judges.yaml")),
+    );
+    await writeFile(
+      join(mirrorRoot, "tamper-canonical.mjs"),
+      [
+        'import { appendFileSync, chmodSync, writeFileSync } from "node:fs";',
+        'import { resolve } from "node:path";',
+        'const canonicalPath = resolve(process.argv[2], "../../../challenge/challenge.html");',
+        "chmodSync(canonicalPath, 0o644);",
+        'appendFileSync(canonicalPath, "\\n<!-- canonical tampered -->\\n");',
+        'writeFileSync(process.argv[3], "body { color: red; }\\n");',
+      ].join("\n"),
+      "utf8",
+    );
+
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-canonical-tamper-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot: mirrorRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+
+    await expect(
+      runWaveB({
+        repositoryRoot: mirrorRoot,
+        generationPath: generation.generationPath,
+        contestantAdapters: new Map(
+          ["fixture-geometric", "fixture-generic"].map((id) => [
+            id,
+            new FixtureContestantAdapter({
+              fixtureRoot: join(repositoryRoot, "test/fixtures/contestants"),
+            }),
+          ]),
+        ),
+      }),
+    ).rejects.toThrow(/canonical|integrity|challenge/i);
+  }, 30000);
+
+  it("isolates a contact-sheet setup failure to one judge and continues later judges", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-contact-failure-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+
+    const result = await runWaveB({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      contactSheetBuilder: async (input) => {
+        if (input.judgeId === "fixture-critic-a") {
+          throw new Error("injected contact-sheet failure");
+        }
+        return buildAnonymousContactSheet(input);
+      },
+    });
+
+    expect(result.judges[0]?.failure).toMatch(/contact-sheet|injected/i);
+    expect(result.judges[0]?.candidates).toEqual([]);
+    expect(result.judges[1]?.contactSheet).not.toBeNull();
+    expect(result.judges[1]?.candidates.length).toBeGreaterThan(0);
+  }, 30000);
+
+  it("isolates an unexpected judge setup failure and continues later judges", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-judge-isolation-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+
+    const result = await runWaveB({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      contactSheetBuilder: async (input) => {
+        const built = await buildAnonymousContactSheet(input);
+        if (input.judgeId === "fixture-critic-a") {
+          return null as unknown as Awaited<
+            ReturnType<typeof buildAnonymousContactSheet>
+          >;
+        }
+        return built;
+      },
+    });
+
+    expect(result.judges).toHaveLength(2);
+    expect(result.judges[0]?.failure).toMatch(/judge|setup|contact/i);
+    expect(result.judges[0]?.candidates).toEqual([]);
+    expect(result.judges[1]?.candidates.length).toBeGreaterThan(0);
+    expect(await readFile(join(result.judges[0]!.path, "failure.txt"), "utf8")).toMatch(
+      /judge|setup|contact/i,
+    );
+  }, 30000);
+
+  it("isolates per-candidate staging failures and continues the other judge", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-staging-failure-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+
+    const result = await runWaveB({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      contactSheetBuilder: async (input) => {
+        const built = await buildAnonymousContactSheet(input);
+        return input.judgeId === "fixture-critic-a"
+          ? { ...built, outputPath: `${built.outputPath}.missing` }
+          : built;
+      },
+    });
+    const failedJudge = result.judges.find(
+      (judge) => judge.judgeId === "fixture-critic-a",
+    )!;
+    expect(failedJudge.candidates).toHaveLength(3);
+    expect(
+      failedJudge.candidates.every((candidate) => candidate.result.status === "failed"),
+    ).toBe(true);
+    expect(failedJudge.failure).toMatch(/candidate|stage|staging/i);
+    expect(
+      result.judges.find((judge) => judge.judgeId === "fixture-critic-b")?.candidates
+        .length,
+    ).toBe(3);
+  }, 30000);
+
+  it("rejects tampered sanitised CSS before staging it for a judge", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-sanitised-tamper-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    const firstRun = await runWaveB({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      seasonId: "0001",
+    });
+    const target = firstRun.contestants[0]!;
+    await writeFile(
+      join(target.path, "sanitised.css"),
+      ":root { --tampered: true; }\n",
+      "utf8",
+    );
+
+    const secondRun = await runWaveB({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      seasonId: "0001",
+    });
+    const candidateId = target.anonymousCandidateId;
+    for (const judge of secondRun.judges) {
+      const assessment = judge.candidates.find(
+        (candidate) => candidate.anonymousCandidateId === candidateId,
+      );
+      expect(assessment?.result.status).toBe("failed");
+      expect(assessment?.result.error).toMatch(/sanitised|hash|canonical/i);
+      expect(assessment?.durablePath).toBeNull();
+    }
+  }, 30000);
+
+  it("domain-separates judge seeds when the injected random source repeats bytes", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-seed-domains-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    const result = await runWaveB({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      randomBytes: (size) => Buffer.alloc(size, 0x5a),
+    });
+
+    const seeds: string[] = [];
+    for (const judge of result.judges) {
+      const contactOrder = ContactSheetOrderSchema.parse(
+        JSON.parse(
+          await readFile(join(judge.path, "contact-sheet-order.json"), "utf8"),
+        ) as unknown,
+      );
+      const assessmentOrder = JudgeAssessmentOrderSchema.parse(
+        JSON.parse(
+          await readFile(join(judge.path, "assessment-order.json"), "utf8"),
+        ) as unknown,
+      );
+      seeds.push(contactOrder.seed, assessmentOrder.seed);
+    }
+    expect(new Set(seeds).size).toBe(seeds.length);
+  }, 30000);
+
+  it("stops when canonical challenge inputs change during rendering", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-render-integrity-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    const canonicalHtmlPath = join(
+      generation.generationPath,
+      "challenge/challenge.html",
+    );
+    let tampered = false;
+
+    await expect(
+      runWaveB({
+        repositoryRoot,
+        generationPath: generation.generationPath,
+        renderer: {
+          render: async (input) => {
+            if (!tampered) {
+              tampered = true;
+              await chmod(canonicalHtmlPath, 0o644);
+              await appendFile(
+                canonicalHtmlPath,
+                "\n<!-- tampered during render -->\n",
+              );
+            }
+            return {
+              status: "valid" as const,
+              screenshotPath: input.screenshotPath,
+              renderChecks: [],
+              errors: [],
+              warnings: [],
+              externalRequests: [],
+              observedVersions: {
+                playwright: "test",
+                chromium: "test",
+              },
+            };
+          },
+        },
+      }),
+    ).rejects.toThrow(/canonical|integrity|challenge/i);
+  }, 30000);
+
+  it("rejects generation config tampering even when its manifest hash is rewritten", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-config-integrity-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    const contestantsConfigPath = join(
+      generation.generationPath,
+      "config/contestants.yaml",
+    );
+    const tamperedConfig = `${await readFile(contestantsConfigPath, "utf8")}\n# tampered\n`;
+    await writeFile(contestantsConfigPath, tamperedConfig, "utf8");
+    const manifestPath = join(generation.generationPath, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+      configHashes: { contestants: string };
+    };
+    manifest.configHashes.contestants = createHash("sha256")
+      .update(tamperedConfig)
+      .digest("hex");
+    await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`, "utf8");
+
+    await expect(
+      runWaveB({
+        repositoryRoot,
+        generationPath: generation.generationPath,
+        seasonId: "0001",
+      }),
+    ).rejects.toThrow(/canonical|snapshot|manifest|integrity/i);
+  }, 30000);
+});

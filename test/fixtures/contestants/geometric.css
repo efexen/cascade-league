@@ -1,0 +1,287 @@
+@font-face {
+  font-family: "LM Display Sans";
+  src: url("fonts/lm-display-sans.ttf") format("truetype");
+}
+
+:root {
+  --fixture-style: geometric;
+  --ink: #10233c;
+  --blue: #55b8d8;
+  --yellow: #f4cd57;
+  background: #f4f7fb;
+  color: var(--ink);
+  font-family: "LM Display Sans", sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.page-shell {
+  margin: 0 auto;
+  max-width: 1200px;
+  padding: 24px 24px 52px;
+}
+
+.masthead,
+.introduction,
+.rules,
+.leaderboard,
+.awards,
+.method,
+.judge-notes,
+.site-footer {
+  border-top: 4px solid var(--ink);
+  padding-top: 10px;
+}
+
+.masthead {
+  display: grid;
+  gap: 6px 18px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.masthead > *,
+.entry-header h3,
+.entry-header p,
+.entry-visual,
+.entry-scores,
+.entry-awards {
+  margin: 0;
+}
+
+.site-title {
+  color: var(--ink);
+  font-size: 48px;
+  grid-column: 1 / -1;
+  letter-spacing: -0.04em;
+  line-height: 0.92;
+  margin: 8px 0 0;
+  max-width: 18ch;
+}
+
+.site-description,
+.lede {
+  font-size: 16px;
+  line-height: 1.2;
+  max-width: 52ch;
+}
+
+.generation-meta,
+.entry-scores {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 0;
+}
+
+.generation-meta div,
+.entry-scores div {
+  background: var(--yellow);
+  border: 2px solid var(--ink);
+  padding: 4px 6px;
+}
+
+.generation-meta dt,
+.generation-meta dd,
+.entry-scores dt,
+.entry-scores dd {
+  margin: 0;
+}
+
+.generation-meta dd,
+.entry-scores dd {
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.main-content {
+  display: grid;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.section-header {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.section-title {
+  font-size: 22px;
+  margin: 0;
+}
+
+.section-kicker,
+.entry-rank,
+.entry-caption,
+.entry-scores dt,
+.site-footer {
+  font-family: monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.central-question {
+  background: var(--blue);
+  border: 2px solid var(--ink);
+  font-size: 20px;
+  margin: 10px 0 0;
+  padding: 8px 12px;
+}
+
+.central-question p {
+  margin: 0;
+}
+
+.rules-list {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: repeat(5, 1fr);
+  list-style-position: inside;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+.rule {
+  background: #ffffff;
+  border: 2px solid var(--ink);
+  font-size: 11px;
+  min-height: 44px;
+  padding: 6px;
+}
+
+.leaderboard-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, 1fr);
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+.entry-card {
+  background: #ffffff;
+  border: 2px solid var(--ink);
+  box-shadow: 5px 5px 0 var(--blue);
+  display: grid;
+  gap: 6px;
+  padding: 7px;
+}
+
+.entry-title {
+  font-size: 17px;
+  margin-top: 3px !important;
+}
+
+.entry-identity {
+  font-size: 10px;
+  margin-top: 2px !important;
+}
+
+.entry-visual {
+  background: var(--yellow);
+  overflow: hidden;
+}
+
+.entry-thumbnail {
+  aspect-ratio: 6 / 5;
+  display: block;
+  height: auto;
+  object-fit: cover;
+  width: 100%;
+}
+
+.entry-caption {
+  padding: 4px;
+}
+
+.entry-scores dd {
+  font-size: 12px;
+}
+
+.entry-awards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  list-style: none;
+  padding: 0;
+}
+
+.entry-award {
+  background: var(--blue);
+  border: 2px solid var(--ink);
+  font-size: 9px;
+  padding: 2px 4px;
+}
+
+.entry-detail-link {
+  color: inherit;
+  font-size: 10px;
+}
+
+.awards-list,
+.judge-note-list {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, 1fr);
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+.award,
+.judge-note {
+  background: var(--yellow);
+  border: 2px solid var(--ink);
+  padding: 7px;
+}
+
+.award h3,
+.award p,
+.judge-note h4,
+.judge-note p {
+  margin: 0;
+}
+
+.award-winner,
+.award-rationale,
+.judge-critique {
+  font-size: 11px;
+  line-height: 1.2;
+  margin-top: 5px !important;
+}
+
+.entry-detail {
+  border-top: 2px solid var(--ink);
+  margin-top: 10px;
+  padding-top: 7px;
+}
+
+.entry-detail-header {
+  display: flex;
+  justify-content: space-between;
+}
+
+.entry-detail-header h3,
+.entry-detail-header p {
+  margin: 0;
+}
+
+.site-footer {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 18px;
+}
+
+.site-footer p {
+  margin: 0;
+}

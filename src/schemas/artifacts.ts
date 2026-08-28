@@ -197,11 +197,100 @@ export const ValidationSchema = StrictObject({
   schemaVersion: SchemaVersionSchema,
   status: ValidationStatusSchema,
   submissionSha256: Sha256Schema.nullable(),
+  sanitisedSha256: Sha256Schema.nullable(),
   submissionBytes: NonNegativeIntegerSchema,
   staticChecks: z.array(ValidationCheckSchema),
   renderChecks: z.array(ValidationCheckSchema),
+  renderEnvironment: StrictObject({
+    playwright: Text(100),
+    chromium: Text(100),
+  }).optional(),
   errors: z.array(z.string().max(2000)),
   warnings: z.array(z.string().max(2000)),
+}).superRefine((validation, context) => {
+  if (validation.status === "valid" && validation.sanitisedSha256 === null) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["sanitisedSha256"],
+      message: "valid submissions must record a sanitised CSS hash",
+    });
+  }
+});
+
+const RandomSeedSchema = z.string().min(1).max(256);
+
+export const ContactSheetOrderSchema = StrictObject({
+  schemaVersion: SchemaVersionSchema,
+  generationId: GenerationIdSchema,
+  judgeId: JudgeIdSchema,
+  seed: RandomSeedSchema,
+  candidateOrder: z
+    .array(AnonymousCandidateIdSchema)
+    .min(1)
+    .superRefine((order, context) => {
+      if (!uniqueValues(order)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "candidate order must be unique",
+        });
+      }
+    }),
+});
+
+export const JudgeAssessmentOrderSchema = StrictObject({
+  schemaVersion: SchemaVersionSchema,
+  generationId: GenerationIdSchema,
+  judgeId: JudgeIdSchema,
+  seed: RandomSeedSchema,
+  assessmentOrder: z
+    .array(AnonymousCandidateIdSchema)
+    .min(1)
+    .superRefine((order, context) => {
+      if (!uniqueValues(order)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "assessment order must be unique",
+        });
+      }
+    }),
+});
+
+const JudgeTaskTimingEntrySchema = StrictObject({
+  operation: z.enum(["candidate", "awards"]),
+  anonymousCandidateId: AnonymousCandidateIdSchema.nullable(),
+  startedAt: UtcTimestampSchema,
+  completedAt: UtcTimestampSchema,
+  durationMs: NonNegativeIntegerSchema,
+}).superRefine((entry, context) => {
+  if (entry.operation === "candidate" && entry.anonymousCandidateId === null) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["anonymousCandidateId"],
+      message: "candidate timing must name its anonymous candidate",
+    });
+  }
+  if (entry.operation === "awards" && entry.anonymousCandidateId !== null) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["anonymousCandidateId"],
+      message: "awards timing must not name a candidate",
+    });
+  }
+  const duration = Date.parse(entry.completedAt) - Date.parse(entry.startedAt);
+  if (duration !== entry.durationMs) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["durationMs"],
+      message: "timing duration must equal completion minus start",
+    });
+  }
+});
+
+export const JudgeTaskTimingsSchema = StrictObject({
+  schemaVersion: SchemaVersionSchema,
+  generationId: GenerationIdSchema,
+  judgeId: JudgeIdSchema,
+  tasks: z.array(JudgeTaskTimingEntrySchema).min(1),
 });
 
 const ScoreSchema = (maximum: number) => z.number().int().min(0).max(maximum);
@@ -216,7 +305,21 @@ export const JudgmentScoresSchema = StrictObject({
   constraintAndCssCraft: ScoreSchema(10),
 });
 
-export const CandidateJudgmentSchema = StrictObject({
+export const JudgeSummarySchema = StrictObject({
+  schemaVersion: SchemaVersionSchema,
+  generationId: GenerationIdSchema,
+  judgeId: JudgeIdSchema,
+  entries: z.array(
+    StrictObject({
+      anonymousCandidateId: AnonymousCandidateIdSchema,
+      totalScore: ScoreSchema(100),
+      originalityScore: ScoreSchema(20),
+      critique: Text(500),
+    }),
+  ),
+});
+
+const CandidateJudgmentResponseShape = {
   schemaVersion: SchemaVersionSchema,
   generationId: GenerationIdSchema,
   judgeId: JudgeIdSchema,
@@ -237,25 +340,43 @@ export const CandidateJudgmentSchema = StrictObject({
   nextMove: Text(500),
   confidence: z.enum(["low", "medium", "high"]),
   flags: z.array(SlugLikeCodeSchema()),
-  modelUsage: StrictObject({
-    inputTokens: NonNegativeIntegerSchema.nullable(),
-    outputTokens: NonNegativeIntegerSchema.nullable(),
-    totalTokens: NonNegativeIntegerSchema.nullable(),
-    estimatedCostUsd: NonNegativeNumberSchema.nullable(),
+};
+
+function withCalculatedJudgmentTotal<T extends z.ZodRawShape>(schema: z.ZodObject<T>) {
+  return schema.superRefine((judgment, context) => {
+    const typedJudgment = judgment as {
+      scores: Record<string, number>;
+      totalScore: number;
+    };
+    const calculatedTotal = Object.values(typedJudgment.scores).reduce(
+      (sum, score) => sum + score,
+      0,
+    );
+    if (typedJudgment.totalScore !== calculatedTotal) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["totalScore"],
+        message: `totalScore must equal the seven dimension scores (${calculatedTotal})`,
+      });
+    }
+  });
+}
+
+export const JudgeCandidateResponseSchema = withCalculatedJudgmentTotal(
+  StrictObject(CandidateJudgmentResponseShape),
+);
+
+export const CandidateJudgmentSchema = withCalculatedJudgmentTotal(
+  StrictObject({
+    ...CandidateJudgmentResponseShape,
+    modelUsage: StrictObject({
+      inputTokens: NonNegativeIntegerSchema.nullable(),
+      outputTokens: NonNegativeIntegerSchema.nullable(),
+      totalTokens: NonNegativeIntegerSchema.nullable(),
+      estimatedCostUsd: NonNegativeNumberSchema.nullable(),
+    }),
   }),
-}).superRefine((judgment, context) => {
-  const calculatedTotal = Object.values(judgment.scores).reduce(
-    (sum, score) => sum + score,
-    0,
-  );
-  if (judgment.totalScore !== calculatedTotal) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["totalScore"],
-      message: `totalScore must equal the seven dimension scores (${calculatedTotal})`,
-    });
-  }
-});
+);
 
 const AwardItemSchema = StrictObject({
   label: Text(50).superRefine((value, context) => {
@@ -455,7 +576,13 @@ export type Snapshot = z.infer<typeof SnapshotSchema>;
 export type Identity = z.infer<typeof IdentitySchema>;
 export type Run = z.infer<typeof RunSchema>;
 export type Validation = z.infer<typeof ValidationSchema>;
+export type ContactSheetOrder = z.infer<typeof ContactSheetOrderSchema>;
+export type JudgeAssessmentOrder = z.infer<typeof JudgeAssessmentOrderSchema>;
+export type JudgeTaskTimings = z.infer<typeof JudgeTaskTimingsSchema>;
+export type JudgeSummary = z.infer<typeof JudgeSummarySchema>;
 export type CandidateJudgment = z.infer<typeof CandidateJudgmentSchema>;
+export type JudgeCandidateResponse = z.infer<typeof JudgeCandidateResponseSchema>;
+export type JudgmentScores = z.infer<typeof JudgmentScoresSchema>;
 export type GenerationAwards = z.infer<typeof GenerationAwardsSchema>;
 export type Leaderboard = z.infer<typeof LeaderboardSchema>;
 export type AnonymousMap = z.infer<typeof AnonymousMapSchema>;

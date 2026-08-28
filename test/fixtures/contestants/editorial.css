@@ -1,0 +1,277 @@
+@font-face {
+  font-family: "LM Readable Serif";
+  src: url("fonts/lm-readable-serif.ttf") format("truetype");
+}
+
+:root {
+  --fixture-style: editorial;
+  --ink: #24211d;
+  --paper: #f5f0e8;
+  --line: #9c9182;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "LM Readable Serif", Georgia, serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.page-shell {
+  margin: 0 auto;
+  max-width: 1180px;
+  padding: 28px 28px 56px;
+}
+
+.masthead,
+.introduction,
+.rules,
+.leaderboard,
+.awards,
+.method,
+.judge-notes,
+.site-footer {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.masthead {
+  display: grid;
+  gap: 8px 18px;
+  grid-template-columns: 1fr 2fr;
+}
+
+.masthead > *,
+.entry-header h3,
+.entry-header p,
+.entry-visual,
+.entry-scores,
+.entry-awards {
+  margin: 0;
+}
+
+.site-title {
+  font-size: 50px;
+  grid-column: 1 / -1;
+  line-height: 0.98;
+  margin: 10px 0 2px;
+}
+
+.site-description,
+.lede {
+  font-size: 16px;
+  line-height: 1.25;
+  max-width: 55ch;
+}
+
+.generation-meta,
+.entry-scores {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 0;
+}
+
+.generation-meta div,
+.entry-scores div {
+  border-left: 1px solid var(--line);
+  padding-left: 8px;
+}
+
+.generation-meta dt,
+.generation-meta dd,
+.entry-scores dt,
+.entry-scores dd {
+  margin: 0;
+}
+
+.generation-meta dd,
+.entry-scores dd {
+  font-size: 14px;
+  margin-top: 3px;
+}
+
+.main-content {
+  display: grid;
+  gap: 22px;
+  margin-top: 22px;
+}
+
+.section-header {
+  align-items: baseline;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.section-title {
+  font-size: 23px;
+  margin: 0;
+}
+
+.section-kicker,
+.entry-rank,
+.entry-caption,
+.entry-scores dt,
+.site-footer {
+  font-family: monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.central-question {
+  border-left: 3px solid var(--ink);
+  font-size: 21px;
+  margin: 12px 0 0;
+  padding-left: 12px;
+}
+
+.central-question p {
+  margin: 0;
+}
+
+.rules-list {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(5, 1fr);
+  list-style-position: inside;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.rule {
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  padding: 7px 0;
+}
+
+.leaderboard-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, 1fr);
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.entry-card {
+  border: 1px solid var(--line);
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+}
+
+.entry-title {
+  font-size: 18px;
+  margin-top: 4px !important;
+}
+
+.entry-identity {
+  font-size: 11px;
+  margin-top: 2px !important;
+}
+
+.entry-visual {
+  background: #e6ded1;
+  overflow: hidden;
+}
+
+.entry-thumbnail {
+  aspect-ratio: 6 / 5;
+  display: block;
+  height: auto;
+  object-fit: cover;
+  width: 100%;
+}
+
+.entry-caption {
+  padding: 5px;
+}
+
+.entry-scores dd {
+  font-size: 13px;
+}
+
+.entry-awards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  list-style: none;
+  padding: 0;
+}
+
+.entry-award {
+  border: 1px solid var(--line);
+  font-size: 10px;
+  padding: 2px 4px;
+}
+
+.entry-detail-link {
+  color: inherit;
+  font-size: 11px;
+}
+
+.awards-list,
+.judge-note-list {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, 1fr);
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.award,
+.judge-note {
+  border-left: 2px solid var(--line);
+  padding-left: 8px;
+}
+
+.award h3,
+.award p,
+.judge-note h4,
+.judge-note p {
+  margin: 0;
+}
+
+.award-winner,
+.award-rationale,
+.judge-critique {
+  font-size: 12px;
+  line-height: 1.25;
+  margin-top: 5px !important;
+}
+
+.entry-detail {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 8px;
+}
+
+.entry-detail-header {
+  display: flex;
+  justify-content: space-between;
+}
+
+.entry-detail-header h3,
+.entry-detail-header p {
+  margin: 0;
+}
+
+.site-footer {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 22px;
+}
+
+.site-footer p {
+  margin: 0;
+}

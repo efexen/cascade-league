@@ -305,4 +305,84 @@ describe("configuration schemas", () => {
       }),
     ).toThrow();
   });
+
+  it("allows the judge usage output placeholder in the shared command contract", () => {
+    const judgeWithUsage = {
+      ...judge,
+      harness: {
+        ...judge.harness,
+        command: {
+          ...judge.harness.command,
+          argv: [...judge.harness.command.argv, "{usageOutputPath}"],
+        },
+      },
+    };
+    expect(
+      JudgesConfigSchema.parse({
+        schemaVersion: 1,
+        defaults: {
+          timeoutMs: 180000,
+          maximumOutputTokens: 4000,
+          concurrencyPerJudge: 2,
+        },
+        judges: [judgeWithUsage],
+      }),
+    ).toBeTruthy();
+  });
+
+  it("rejects contestant-only paths in judge command configuration", () => {
+    for (const forbiddenPlaceholder of [
+      "{challengePath}",
+      "{starterCssPath}",
+      "{submissionPath}",
+    ]) {
+      expect(() =>
+        JudgesConfigSchema.parse({
+          schemaVersion: 1,
+          defaults: {
+            timeoutMs: 180000,
+            maximumOutputTokens: 4000,
+            concurrencyPerJudge: 2,
+          },
+          judges: [
+            {
+              ...judge,
+              harness: {
+                ...judge.harness,
+                command: {
+                  ...judge.harness.command,
+                  argv: ["/usr/bin/env", forbiddenPlaceholder],
+                },
+              },
+            },
+          ],
+        }),
+      ).toThrow();
+    }
+  });
+
+  it("caps configured concurrency at four contestants and two assessments per judge", () => {
+    const contestantsConfig = {
+      schemaVersion: 1,
+      defaults: {
+        timeoutMs: 480000,
+        maximumTotalTokens: 30000,
+        maximumSubmissionBytes: 61440,
+        concurrency: 5,
+      },
+      contestants: [contestant, { ...contestant, id: "second-contestant" }],
+    };
+    const judgesConfig = {
+      schemaVersion: 1,
+      defaults: {
+        timeoutMs: 180000,
+        maximumOutputTokens: 4000,
+        concurrencyPerJudge: 3,
+      },
+      judges: [judge],
+    };
+
+    expect(() => ContestantsConfigSchema.parse(contestantsConfig)).toThrow();
+    expect(() => JudgesConfigSchema.parse(judgesConfig)).toThrow();
+  });
 });

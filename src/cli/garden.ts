@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
 import { Command } from "commander";
+import { resolve } from "node:path";
 
 import { createGeneration } from "../artifacts/generation.js";
+import { runWaveB } from "../orchestration/wave-b.js";
 import {
   normalizeGenerationId,
   normalizeSeasonId,
@@ -50,5 +52,61 @@ program
       `[${result.generationId}] generation created: ${result.generationPath}`,
     );
   });
+
+program
+  .command("run-wave-b")
+  .description("Run contestants, validation, rendering, anonymous judging, and awards")
+  .option("--season <season>", "three-digit season alias or four-digit season ID")
+  .option("--generation <generation>", "accept an existing four-digit generation ID")
+  .option("--generation-path <path>", "accept an existing generation directory")
+  .option("--generations-root <path>", "root directory for newly created generations")
+  .action(
+    async (options: {
+      season?: string;
+      generation?: string;
+      generationPath?: string;
+      generationsRoot?: string;
+    }) => {
+      const seasonId =
+        options.season === undefined ? undefined : normalizeSeasonId(options.season);
+      const generationId =
+        options.generation === undefined
+          ? undefined
+          : normalizeGenerationId(options.generation);
+      if (options.generationPath !== undefined && generationId !== undefined) {
+        throw new Error("use either --generation or --generation-path, not both");
+      }
+      if (
+        seasonId === undefined &&
+        options.generationPath === undefined &&
+        generationId === undefined
+      ) {
+        throw new Error(
+          "--season is required when creating a generation; otherwise provide --generation or --generation-path",
+        );
+      }
+      const existingGenerationPath =
+        options.generationPath === undefined &&
+        seasonId === undefined &&
+        generationId !== undefined
+          ? resolve(options.generationsRoot ?? "generations", generationId)
+          : options.generationPath === undefined
+            ? undefined
+            : resolve(options.generationPath);
+      const result = await runWaveB({
+        repositoryRoot: process.cwd(),
+        ...(seasonId === undefined ? {} : { seasonId }),
+        ...(existingGenerationPath === undefined
+          ? {}
+          : { generationPath: existingGenerationPath }),
+        ...(options.generationsRoot === undefined
+          ? {}
+          : { generationsRoot: resolve(options.generationsRoot) }),
+        ...(generationId === undefined ? {} : { generationId }),
+        onProgress: (message) => console.log(message),
+      });
+      console.log(`[${result.generationId}] Wave-B complete: ${result.generationPath}`);
+    },
+  );
 
 await program.parseAsync(process.argv);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CandidateJudgmentSchema,
+  JudgeCandidateResponseSchema,
   GenerationAwardsSchema,
   IdentitySchema,
   LeaderboardSchema,
@@ -140,6 +141,7 @@ describe("artifact schemas", () => {
         schemaVersion: 1,
         status: "valid",
         submissionSha256: hash,
+        sanitisedSha256: hash,
         submissionBytes: 18342,
         staticChecks: [
           { code: "css_parse", status: "passed", message: "CSS parsed successfully" },
@@ -217,6 +219,14 @@ describe("artifact schemas", () => {
         errors: [],
       }),
     ).toThrow();
+  });
+
+  it("keeps adapter-measured usage out of the exact judge response schema", () => {
+    const response = { ...judgment };
+    const { modelUsage, ...modelResponse } = response;
+    expect(modelUsage).toBeDefined();
+    expect(JudgeCandidateResponseSchema.parse(modelResponse)).toEqual(modelResponse);
+    expect(() => JudgeCandidateResponseSchema.parse(response)).toThrow();
   });
 
   it("bounds awards and rejects an unknown anonymous candidate with contextual validation", () => {
