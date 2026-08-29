@@ -23,6 +23,7 @@ describe("generation scoring artifacts", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -51,6 +52,7 @@ describe("generation scoring artifacts", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -97,6 +99,7 @@ describe("generation scoring artifacts", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -136,6 +139,7 @@ describe("generation scoring artifacts", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });

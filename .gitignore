@@ -3,6 +3,7 @@ playwright-report/
 test-results/
 coverage/
 generations/
+config/profiles/real.local/
 .DS_Store
 *.log
 .env

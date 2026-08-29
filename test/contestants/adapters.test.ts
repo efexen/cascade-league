@@ -260,18 +260,21 @@ describe("command contestant adapter", () => {
     const workspacePath = join(root, "workspace");
     await mkdir(workspacePath, { recursive: true });
     const pidPath = join(root, "pids.txt");
-    const scriptPath = join(root, "tree-contestant.mjs");
+    const scriptPath = join(root, "tree-contestant.sh");
     const grandchildCode =
       'process.on("SIGTERM", () => undefined); setInterval(() => undefined, 10);';
+    // A POSIX shell group leader records both pids within milliseconds of
+    // exec: the grandchild pid is already known at fork time, so the record
+    // cannot race the adapter's fixed timeout against slow Node startup.
+    // The leader still ignores SIGTERM and the Node grandchild still holds
+    // the inherited stdio, so the process-group kill semantics are unchanged.
     await writeFile(
       scriptPath,
       [
-        'import { spawn } from "node:child_process";',
-        'import { writeFileSync } from "node:fs";',
-        `const grandchild = spawn(process.execPath, ["-e", ${JSON.stringify(grandchildCode)}], { stdio: "inherit" });`,
-        "writeFileSync(process.argv[2], `${process.pid}\\n${grandchild.pid}\\n`);",
-        'process.on("SIGTERM", () => undefined);',
-        "setInterval(() => undefined, 10);",
+        "trap '' TERM",
+        `"$2" -e ${JSON.stringify(grandchildCode)} &`,
+        'printf \'%s\\n%s\\n\' "$$" "$!" > "$1"',
+        "while :; do sleep 60; done",
       ].join("\n"),
       "utf8",
     );
@@ -282,7 +285,7 @@ describe("command contestant adapter", () => {
         name: "command-harness",
         adapter: "command" as const,
         command: {
-          argv: [process.execPath, scriptPath, pidPath],
+          argv: ["/bin/sh", scriptPath, pidPath, process.execPath],
           environmentAllowlist: [],
         },
       },

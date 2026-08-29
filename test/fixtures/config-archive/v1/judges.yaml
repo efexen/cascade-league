@@ -1,0 +1,43 @@
+# Archived schemaVersion 1 judge run configuration.
+#
+# This is the original Phase 1 root `config/judges.yaml` document, kept
+# verbatim (apart from this comment block) as the durable proof that the
+# tolerant schemaVersion 1/2 read path still parses and normalises archived v1
+# run configuration without inventing v2-only fields. Never edit the document
+# body below; add new archived versions as new files instead.
+schemaVersion: 1
+defaults:
+  timeoutMs: 180000
+  maximumOutputTokens: 4000
+  concurrencyPerJudge: 2
+judges:
+  - id: fixture-critic-a
+    displayName: Fixture Critic A
+    harness:
+      name: fixture-judge
+      version: "1.0.0"
+      adapter: fixture
+      fixture: critic-a
+    model:
+      provider: local-fixture
+      name: critic-a-model
+      version: "1.0.0"
+    budget:
+      timeoutMs: 180000
+      maximumOutputTokens: 4000
+    enabled: true
+  - id: fixture-critic-b
+    displayName: Fixture Critic B
+    harness:
+      name: fixture-judge
+      version: "1.0.0"
+      adapter: fixture
+      fixture: critic-b
+    model:
+      provider: local-fixture
+      name: critic-b-model
+      version: "1.0.0"
+    budget:
+      timeoutMs: 180000
+      maximumOutputTokens: 4000
+    enabled: true

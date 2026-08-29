@@ -1,0 +1,62 @@
+# Archived schemaVersion 1 contestant run configuration.
+#
+# This is the original Phase 1 root `config/contestants.yaml` document, kept
+# verbatim (apart from this comment block) as the durable proof that the
+# tolerant schemaVersion 1/2 read path still parses and normalises archived v1
+# run configuration without inventing v2-only fields. Never edit the document
+# body below; add new archived versions as new files instead.
+schemaVersion: 1
+defaults:
+  timeoutMs: 480000
+  maximumTotalTokens: 30000
+  maximumSubmissionBytes: 61440
+  concurrency: 4
+contestants:
+  - id: fixture-editorial
+    displayName: Fixture Harness + Editorial Model
+    harness:
+      name: fixture-harness
+      version: "1.0.0"
+      adapter: fixture
+      fixture: editorial
+    model:
+      provider: local-fixture
+      name: editorial-model
+      version: "1.0.0"
+      reasoningEffort: medium
+    budget:
+      timeoutMs: 480000
+      maximumTotalTokens: 30000
+    enabled: true
+  - id: fixture-geometric
+    displayName: Fixture Harness + Geometric Model
+    harness:
+      name: fixture-harness
+      version: "1.0.0"
+      adapter: fixture
+      fixture: geometric
+    model:
+      provider: local-fixture
+      name: geometric-model
+      version: "1.0.0"
+      reasoningEffort: medium
+    budget:
+      timeoutMs: 480000
+      maximumTotalTokens: 30000
+    enabled: true
+  - id: fixture-generic
+    displayName: Fixture Harness + Generic Model
+    harness:
+      name: fixture-harness
+      version: "1.0.0"
+      adapter: fixture
+      fixture: generic
+    model:
+      provider: local-fixture
+      name: generic-model
+      version: "1.0.0"
+      reasoningEffort: medium
+    budget:
+      timeoutMs: 480000
+      maximumTotalTokens: 30000
+    enabled: true

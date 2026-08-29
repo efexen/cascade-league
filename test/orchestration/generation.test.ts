@@ -96,6 +96,7 @@ describe("complete generation orchestration", () => {
       repositoryRoot: temporaryRepository,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -137,6 +138,7 @@ describe("complete generation orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -183,6 +185,7 @@ describe("complete generation orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generatedAt: "2026-08-28T20:15:00.000Z",
       onProgress: (message) => progress.push(message),
     });
@@ -197,6 +200,7 @@ describe("complete generation orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -227,6 +231,7 @@ describe("complete generation orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -304,6 +309,7 @@ describe("complete generation orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -354,6 +360,7 @@ describe("complete generation orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -439,6 +446,7 @@ describe("complete generation orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -537,6 +545,7 @@ describe("complete generation orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -599,6 +608,7 @@ describe("complete generation orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -682,6 +692,7 @@ describe("complete generation orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -708,7 +719,11 @@ describe("complete generation orchestration", () => {
         generationPath: generation.generationPath,
         contestantAdapters,
         afterTask: async (task) => {
-          if (!interrupted && task.role === "contestant") {
+          if (
+            !interrupted &&
+            task.role === "contestant" &&
+            task.targetId === "fixture-editorial"
+          ) {
             interrupted = true;
             interruptedTaskId = task.taskId;
             throw new Error("interrupt after failed contestant");
@@ -762,6 +777,7 @@ describe("complete generation orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -865,6 +881,7 @@ describe("complete generation orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -939,6 +956,7 @@ describe("complete generation orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -984,6 +1002,7 @@ describe("complete generation orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });

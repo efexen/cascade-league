@@ -19,6 +19,21 @@ export const SlugSchema = z
 export const ContestantIdSchema = SlugSchema;
 export const JudgeIdSchema = SlugSchema;
 
+// The required profile layout names the checked-in template `real.example`
+// and the ignored operator profile `real.local`, so a profile identifier is
+// one or more dot-separated SlugSchema segments. Every segment is still a
+// strict lowercase hyphenated slug, which keeps empty segments, path
+// separators, `.`/`..` traversal, uppercase, spaces, and other non-slug input
+// rejected before any filesystem access.
+export const ProfileIdSchema = z
+  .string()
+  .min(1, "must not be empty")
+  .refine(
+    (value) =>
+      value.split(".").every((segment) => SlugSchema.safeParse(segment).success),
+    "must be a lowercase hyphenated slug or dot-separated lowercase hyphenated slugs without empty, . or .. segments",
+  );
+
 export const AnonymousCandidateIdSchema = z
   .string()
   .regex(/^candidate-[a-z0-9]{4,32}$/, "must be a candidate-… anonymous ID");

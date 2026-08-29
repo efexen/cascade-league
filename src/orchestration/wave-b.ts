@@ -33,6 +33,7 @@ import {
   JudgesConfigSchema,
   AnonymousMapSchema,
   ManifestSchema,
+  ProfileJsonSchema,
   RunSchema,
   SnapshotSchema,
   TaskStateSchema,
@@ -47,6 +48,7 @@ import {
   type JudgeConfig,
   type JudgesConfig,
   type Manifest,
+  type ProfileJson,
   type Run,
   type Snapshot,
   type TaskState,
@@ -88,6 +90,7 @@ import {
 export interface WaveBRunOptions {
   readonly repositoryRoot: string;
   readonly seasonId?: string;
+  readonly profileId?: string;
   readonly generationPath?: string;
   readonly generationsRoot?: string;
   readonly generationId?: string;
@@ -185,6 +188,7 @@ interface CanonicalGenerationState {
   readonly snapshot: Snapshot;
   readonly snapshotHash: string;
   readonly configHashes: Manifest["configHashes"];
+  readonly profile: ProfileJson;
 }
 
 const MAX_INTEGRITY_FILE_BYTES = 64 * 1024 * 1024;
@@ -310,12 +314,17 @@ async function loadCanonicalGenerationState(
 ): Promise<CanonicalGenerationState> {
   const snapshotPath = join(generationPath, "challenge/snapshot.json");
   const snapshot = await readJsonWithSchema(snapshotPath, SnapshotSchema);
+  const profile = await readJsonWithSchema(
+    join(generationPath, "config/profile.json"),
+    ProfileJsonSchema,
+  );
   return {
     generationPath,
     repositoryRoot,
     snapshot,
     snapshotHash: await sha256File(snapshotPath),
     configHashes,
+    profile,
   };
 }
 
@@ -363,8 +372,8 @@ async function verifyCanonicalGenerationState(
     challenge: join(dirname(state.snapshot.sourceTemplate), "challenge.yaml")
       .split(sep)
       .join("/"),
-    contestants: "config/contestants.yaml",
-    judges: "config/judges.yaml",
+    contestants: state.profile.sourcePaths.contestants,
+    judges: state.profile.sourcePaths.judges,
   };
   for (const [name, relativePath] of Object.entries(configFiles) as [
     keyof Manifest["configHashes"],
@@ -390,7 +399,12 @@ async function verifyCanonicalGenerationState(
   for (const [provenancePath, expectedHash] of Object.entries(
     state.snapshot.inputHashes,
   )) {
-    const sourcePath = resolve(state.repositoryRoot, provenancePath);
+    // `config/profile.json` is the one generation-relative provenance key:
+    // it is a durable artifact of this generation, not a repository source.
+    const sourcePath =
+      provenancePath === "config/profile.json"
+        ? join(state.generationPath, provenancePath)
+        : resolve(state.repositoryRoot, provenancePath);
     try {
       await verifyRegularFileHash(
         sourcePath,
@@ -2826,9 +2840,12 @@ async function loadGenerationPath(options: WaveBRunOptions): Promise<string> {
   if (options.generationPath !== undefined) return resolve(options.generationPath);
   if (options.seasonId === undefined)
     throw new Error("seasonId is required when creating a Wave-B generation");
+  if (options.profileId === undefined)
+    throw new Error("profileId is required when creating a Wave-B generation");
   const created = await createGeneration({
     repositoryRoot: options.repositoryRoot,
     seasonId: options.seasonId,
+    profileId: options.profileId,
     ...(options.generationsRoot === undefined
       ? {}
       : { generationsRoot: options.generationsRoot }),

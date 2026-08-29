@@ -51,6 +51,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -91,6 +92,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot,
       generationPath: generation.generationPath,
       seasonId: "0001",
+      profileId: "fixture",
       contestantAdapters: new Map(
         ["fixture-editorial", "fixture-geometric", "fixture-generic"].map((id) => [
           id,
@@ -124,6 +126,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -134,6 +137,7 @@ describe("Wave-B fixture orchestration", () => {
       generationPath: generation.generationPath,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       clock: () => new Date(Date.parse("2026-08-28T20:00:00.000Z") + clockTick++ * 10),
     });
 
@@ -300,9 +304,12 @@ describe("Wave-B fixture orchestration", () => {
     await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
       recursive: true,
     });
-    await mkdir(join(mirrorRoot, "config"), { recursive: true });
+    await mkdir(join(mirrorRoot, "config/profiles/fixture"), { recursive: true });
     const contestantsConfig = parseYaml(
-      await readFile(join(repositoryRoot, "config/contestants.yaml"), "utf8"),
+      await readFile(
+        join(repositoryRoot, "config/profiles/fixture/contestants.yaml"),
+        "utf8",
+      ),
     ) as {
       schemaVersion: number;
       defaults: Record<string, unknown>;
@@ -337,13 +344,13 @@ describe("Wave-B fixture orchestration", () => {
       enabled: true,
     }));
     await writeFile(
-      join(mirrorRoot, "config/contestants.yaml"),
+      join(mirrorRoot, "config/profiles/fixture/contestants.yaml"),
       stringifyYaml(contestantsConfig),
       "utf8",
     );
     await writeFile(
-      join(mirrorRoot, "config/judges.yaml"),
-      await readFile(join(repositoryRoot, "config/judges.yaml")),
+      join(mirrorRoot, "config/profiles/fixture/judges.yaml"),
+      await readFile(join(repositoryRoot, "config/profiles/fixture/judges.yaml")),
     );
 
     const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-wave-b-mixed-"));
@@ -351,6 +358,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot: mirrorRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -407,13 +415,16 @@ describe("Wave-B fixture orchestration", () => {
     await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
       recursive: true,
     });
-    await mkdir(join(mirrorRoot, "config"), { recursive: true });
+    await mkdir(join(mirrorRoot, "config/profiles/fixture"), { recursive: true });
     await writeFile(
-      join(mirrorRoot, "config/contestants.yaml"),
-      await readFile(join(repositoryRoot, "config/contestants.yaml")),
+      join(mirrorRoot, "config/profiles/fixture/contestants.yaml"),
+      await readFile(join(repositoryRoot, "config/profiles/fixture/contestants.yaml")),
     );
     const judgesConfig = parseYaml(
-      await readFile(join(repositoryRoot, "config/judges.yaml"), "utf8"),
+      await readFile(
+        join(repositoryRoot, "config/profiles/fixture/judges.yaml"),
+        "utf8",
+      ),
     ) as { judges: Record<string, unknown>[]; [key: string]: unknown };
     judgesConfig.judges[0] = {
       ...judgesConfig.judges[0],
@@ -425,7 +436,7 @@ describe("Wave-B fixture orchestration", () => {
       },
     };
     await writeFile(
-      join(mirrorRoot, "config/judges.yaml"),
+      join(mirrorRoot, "config/profiles/fixture/judges.yaml"),
       stringifyYaml(judgesConfig),
       "utf8",
     );
@@ -437,6 +448,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot: mirrorRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -509,6 +521,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -590,6 +603,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -662,6 +676,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -703,6 +718,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -752,6 +768,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -801,9 +818,12 @@ describe("Wave-B fixture orchestration", () => {
     await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
       recursive: true,
     });
-    await mkdir(join(mirrorRoot, "config"), { recursive: true });
+    await mkdir(join(mirrorRoot, "config/profiles/fixture"), { recursive: true });
     const contestantsConfig = parseYaml(
-      await readFile(join(repositoryRoot, "config/contestants.yaml"), "utf8"),
+      await readFile(
+        join(repositoryRoot, "config/profiles/fixture/contestants.yaml"),
+        "utf8",
+      ),
     ) as { defaults: Record<string, unknown>; contestants: Record<string, unknown>[] };
     contestantsConfig.defaults.concurrency = 1;
     contestantsConfig.contestants[0]!.harness = {
@@ -821,13 +841,13 @@ describe("Wave-B fixture orchestration", () => {
       },
     };
     await writeFile(
-      join(mirrorRoot, "config/contestants.yaml"),
+      join(mirrorRoot, "config/profiles/fixture/contestants.yaml"),
       stringifyYaml(contestantsConfig),
       "utf8",
     );
     await writeFile(
-      join(mirrorRoot, "config/judges.yaml"),
-      await readFile(join(repositoryRoot, "config/judges.yaml")),
+      join(mirrorRoot, "config/profiles/fixture/judges.yaml"),
+      await readFile(join(repositoryRoot, "config/profiles/fixture/judges.yaml")),
     );
     await writeFile(
       join(mirrorRoot, "tamper.mjs"),
@@ -850,6 +870,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot: mirrorRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -880,9 +901,12 @@ describe("Wave-B fixture orchestration", () => {
     await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
       recursive: true,
     });
-    await mkdir(join(mirrorRoot, "config"), { recursive: true });
+    await mkdir(join(mirrorRoot, "config/profiles/fixture"), { recursive: true });
     const contestantsConfig = parseYaml(
-      await readFile(join(repositoryRoot, "config/contestants.yaml"), "utf8"),
+      await readFile(
+        join(repositoryRoot, "config/profiles/fixture/contestants.yaml"),
+        "utf8",
+      ),
     ) as { defaults: Record<string, unknown>; contestants: Record<string, unknown>[] };
     contestantsConfig.defaults.concurrency = 1;
     contestantsConfig.contestants[0]!.harness = {
@@ -900,13 +924,13 @@ describe("Wave-B fixture orchestration", () => {
       },
     };
     await writeFile(
-      join(mirrorRoot, "config/contestants.yaml"),
+      join(mirrorRoot, "config/profiles/fixture/contestants.yaml"),
       stringifyYaml(contestantsConfig),
       "utf8",
     );
     await writeFile(
-      join(mirrorRoot, "config/judges.yaml"),
-      await readFile(join(repositoryRoot, "config/judges.yaml")),
+      join(mirrorRoot, "config/profiles/fixture/judges.yaml"),
+      await readFile(join(repositoryRoot, "config/profiles/fixture/judges.yaml")),
     );
     await writeFile(
       join(mirrorRoot, "tamper-canonical.mjs"),
@@ -928,6 +952,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot: mirrorRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -956,6 +981,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -985,6 +1011,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -1020,6 +1047,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -1056,6 +1084,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -1063,6 +1092,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot,
       generationPath: generation.generationPath,
       seasonId: "0001",
+      profileId: "fixture",
     });
     const target = firstRun.contestants[0]!;
     await writeFile(
@@ -1075,6 +1105,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot,
       generationPath: generation.generationPath,
       seasonId: "0001",
+      profileId: "fixture",
     });
     const candidateId = target.anonymousCandidateId;
     for (const judge of secondRun.judges) {
@@ -1095,6 +1126,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -1129,6 +1161,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -1178,6 +1211,7 @@ describe("Wave-B fixture orchestration", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -1201,6 +1235,7 @@ describe("Wave-B fixture orchestration", () => {
         repositoryRoot,
         generationPath: generation.generationPath,
         seasonId: "0001",
+        profileId: "fixture",
       }),
     ).rejects.toThrow(/canonical|snapshot|manifest|integrity/i);
   }, 30000);

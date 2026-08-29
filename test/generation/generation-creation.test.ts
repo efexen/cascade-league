@@ -16,9 +16,11 @@ import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 import {
   AnonymousMapSchema,
+  ContestantsConfigSchema,
   LeaderboardSchema,
   ManifestSchema,
   SnapshotSchema,
+  readYamlWithSchema,
 } from "../../src/schemas/index.js";
 import { createGeneration } from "../../src/artifacts/generation.js";
 
@@ -61,6 +63,7 @@ async function createCompletedFirstGeneration(
     repositoryRoot: generationRepositoryRoot,
     generationsRoot,
     seasonId: "0001",
+    profileId: "fixture",
     generationId: "0001",
     now: timestamp,
   });
@@ -141,6 +144,97 @@ async function copyRepositoryForTest(): Promise<string> {
 }
 
 describe("immutable generation creation", () => {
+  it("writes config/profile.json, hashes it, and copies profile sources verbatim", async () => {
+    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const result = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      profileId: "fixture",
+      now: timestamp,
+    });
+    const profileJsonPath = join(result.generationPath, "config/profile.json");
+    const profileJson = JSON.parse(await readFile(profileJsonPath, "utf8")) as unknown;
+    expect(profileJson).toEqual({
+      schemaVersion: 1,
+      profileId: "fixture",
+      sourcePaths: {
+        contestants: "config/profiles/fixture/contestants.yaml",
+        judges: "config/profiles/fixture/judges.yaml",
+      },
+    });
+
+    const snapshot = SnapshotSchema.parse(
+      JSON.parse(
+        await readFile(join(result.generationPath, "challenge/snapshot.json"), "utf8"),
+      ) as unknown,
+    );
+    expect(snapshot.inputHashes["config/profile.json"]).toBe(
+      await sha256(profileJsonPath),
+    );
+    expect(snapshot.inputHashes["config/profiles/fixture/contestants.yaml"]).toBe(
+      await sha256(join(repositoryRoot, "config/profiles/fixture/contestants.yaml")),
+    );
+    expect(snapshot.inputHashes["config/profiles/fixture/judges.yaml"]).toBe(
+      await sha256(join(repositoryRoot, "config/profiles/fixture/judges.yaml")),
+    );
+
+    expect(
+      await readFile(join(result.generationPath, "config/contestants.yaml"), "utf8"),
+    ).toBe(
+      await readFile(
+        join(repositoryRoot, "config/profiles/fixture/contestants.yaml"),
+        "utf8",
+      ),
+    );
+    expect(
+      await readFile(join(result.generationPath, "config/judges.yaml"), "utf8"),
+    ).toBe(
+      await readFile(
+        join(repositoryRoot, "config/profiles/fixture/judges.yaml"),
+        "utf8",
+      ),
+    );
+
+    // A generation-level reader must accept the copied configuration through
+    // the tolerant schema, proving the rebuild-from-copied-config rule.
+    const copied = await readYamlWithSchema(
+      join(result.generationPath, "config/contestants.yaml"),
+      ContestantsConfigSchema,
+    );
+    expect(copied.contestants.map((entry) => entry.id)).toEqual([
+      "fixture-editorial",
+      "fixture-geometric",
+      "fixture-generic",
+    ]);
+  });
+
+  it("rejects unknown, symlinked, or traversal profile identifiers at creation", async () => {
+    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    await expect(
+      createGeneration({
+        repositoryRoot,
+        generationsRoot,
+        seasonId: "0001",
+        generationId: "0001",
+        profileId: "absent",
+        now: timestamp,
+      }),
+    ).rejects.toThrow(/absent/);
+    await expect(
+      createGeneration({
+        repositoryRoot,
+        generationsRoot,
+        seasonId: "0001",
+        generationId: "0001",
+        profileId: "../x",
+        now: timestamp,
+      }),
+    ).rejects.toThrow(/slug|profile identifier/i);
+    expect(await readdir(generationsRoot)).toEqual([]);
+  });
+
   it("creates validated artifacts with identical contestant snapshots", async () => {
     const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
     const result = await createGeneration({
@@ -148,6 +242,7 @@ describe("immutable generation creation", () => {
       generationsRoot,
       seasonId: "0001",
       generationId: "0001",
+      profileId: "fixture",
       now: timestamp,
     });
     const generationPath = result.generationPath;
@@ -239,6 +334,7 @@ describe("immutable generation creation", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001" as const,
+      profileId: "fixture",
       generationId: "0001" as const,
       now: timestamp,
     };
@@ -256,6 +352,7 @@ describe("immutable generation creation", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: timestamp,
     });
@@ -273,8 +370,8 @@ describe("immutable generation creation", () => {
       "challenge/season-001/fonts/OFL-1.1.txt",
       "challenge/season-001/seed/thumbnails/seed-01.png",
       "challenge/season-001/challenge.yaml",
-      "config/contestants.yaml",
-      "config/judges.yaml",
+      "config/profiles/fixture/contestants.yaml",
+      "config/profiles/fixture/judges.yaml",
     ];
     for (const provenancePath of representatives) {
       expect(snapshot.inputHashes[provenancePath]).toBe(
@@ -292,8 +389,8 @@ describe("immutable generation creation", () => {
       "challenge/season-001/challenge.hbs",
       "challenge/season-001/seed/seed-generation.json",
       "challenge/season-001/challenge.yaml",
-      "config/contestants.yaml",
-      "config/judges.yaml",
+      "config/profiles/fixture/contestants.yaml",
+      "config/profiles/fixture/judges.yaml",
     ];
     for (const sourcePath of changedSources) {
       const absolutePath = join(changedRepositoryRoot, sourcePath);
@@ -344,6 +441,7 @@ describe("immutable generation creation", () => {
       repositoryRoot: originalRepositoryRoot,
       generationsRoot: originalGenerationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: timestamp,
     });
@@ -351,6 +449,7 @@ describe("immutable generation creation", () => {
       repositoryRoot: changedRepositoryRoot,
       generationsRoot: changedGenerationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: timestamp,
     });
@@ -390,6 +489,7 @@ describe("immutable generation creation", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0002",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -429,6 +529,7 @@ describe("immutable generation creation", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0002",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -478,6 +579,7 @@ describe("immutable generation creation", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0002",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -522,6 +624,7 @@ describe("immutable generation creation", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: timestamp,
     });
@@ -593,6 +696,7 @@ describe("immutable generation creation", () => {
         repositoryRoot,
         generationsRoot,
         seasonId: "0001",
+        profileId: "fixture",
         generationId: "0002",
         now: "2026-08-28T20:00:00.000Z",
       }),
@@ -621,6 +725,7 @@ describe("immutable generation creation", () => {
         repositoryRoot,
         generationsRoot,
         seasonId: "0001",
+        profileId: "fixture",
         generationId: "0002",
         now: "2026-08-28T20:00:00.000Z",
       }),
@@ -637,6 +742,7 @@ describe("immutable generation creation", () => {
         repositoryRoot,
         generationsRoot,
         seasonId: "0001",
+        profileId: "fixture",
         generationId: "0002",
         now: "2026-08-28T20:00:00.000Z",
       }),
@@ -648,7 +754,10 @@ describe("immutable generation creation", () => {
     const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
     const copiedRepositoryRoot = await copyRepositoryForTest();
     await createCompletedFirstGeneration(generationsRoot, true, copiedRepositoryRoot);
-    const contestantsConfigPath = join(copiedRepositoryRoot, "config/contestants.yaml");
+    const contestantsConfigPath = join(
+      copiedRepositoryRoot,
+      "config/profiles/fixture/contestants.yaml",
+    );
     const contestantsConfig = await readFile(contestantsConfigPath, "utf8");
     await writeFile(
       contestantsConfigPath,
@@ -661,6 +770,7 @@ describe("immutable generation creation", () => {
         repositoryRoot: copiedRepositoryRoot,
         generationsRoot,
         seasonId: "0001",
+        profileId: "fixture",
         generationId: "0002",
         now: "2026-08-28T20:00:00.000Z",
       }),
@@ -670,7 +780,10 @@ describe("immutable generation creation", () => {
 
   it("requires at least two enabled contestants at generation creation", async () => {
     const copiedRepositoryRoot = await copyRepositoryForTest();
-    const contestantsConfigPath = join(copiedRepositoryRoot, "config/contestants.yaml");
+    const contestantsConfigPath = join(
+      copiedRepositoryRoot,
+      "config/profiles/fixture/contestants.yaml",
+    );
     const contestantsConfig = await readFile(contestantsConfigPath, "utf8");
     await writeFile(
       contestantsConfigPath,
@@ -686,6 +799,7 @@ describe("immutable generation creation", () => {
         repositoryRoot: copiedRepositoryRoot,
         generationsRoot,
         seasonId: "0001",
+        profileId: "fixture",
         generationId: "0001",
         now: timestamp,
       }),
@@ -721,6 +835,7 @@ describe("immutable generation creation", () => {
         repositoryRoot,
         generationsRoot,
         seasonId: "0001",
+        profileId: "fixture",
         generationId: "0002",
         now: "2026-08-28T20:00:00.000Z",
       }),
@@ -734,6 +849,7 @@ describe("immutable generation creation", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001" as const,
+      profileId: "fixture",
       generationId: "0001" as const,
       now: timestamp,
     };

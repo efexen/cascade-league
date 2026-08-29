@@ -15,7 +15,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "verify": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm garden verify"
+    "verify": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm garden verify --profile fixture"
   },
   "dependencies": {
     "commander": "14.0.0",

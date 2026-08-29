@@ -140,7 +140,7 @@ describe("Phase 1 acceptance outcomes", () => {
     );
     const sourceConfig = ContestantsConfigSchema.parse(
       parseYaml(
-        await readFile(join(root, "config/contestants.yaml"), "utf8"),
+        await readFile(join(root, "config/profiles/fixture/contestants.yaml"), "utf8"),
       ) as unknown,
     );
     const base = sourceConfig.contestants[0]!;
@@ -165,7 +165,10 @@ describe("Phase 1 acceptance outcomes", () => {
         ),
       ],
     });
-    await writeFile(join(root, "config/contestants.yaml"), stringifyYaml(mixedConfig));
+    await writeFile(
+      join(root, "config/profiles/fixture/contestants.yaml"),
+      stringifyYaml(mixedConfig),
+    );
     const generationRoot = await mkdtemp(
       join(tmpdir(), "local-maxima-mixed-generation-"),
     );
@@ -173,6 +176,7 @@ describe("Phase 1 acceptance outcomes", () => {
       repositoryRoot: root,
       generationsRoot: generationRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });
@@ -302,6 +306,7 @@ describe("Phase 1 acceptance outcomes", () => {
       repositoryRoot,
       generationsRoot: generationRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: "2026-08-28T20:00:00.000Z",
     });

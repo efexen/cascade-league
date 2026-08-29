@@ -32,23 +32,22 @@ import {
 } from "../challenge/index.js";
 import {
   AnonymousMapSchema,
-  ContestantsConfigSchema,
   GallerySourceArchiveSchema,
   GenerationIdSchema,
   IdentitySchema,
-  JudgesConfigSchema,
   LeaderboardSchema,
   ManifestSchema,
+  ProfileJsonSchema,
   RunSchema,
   SnapshotSchema,
   SeasonIdSchema,
   UtcTimestampSchema,
-  readYamlWithSchema,
   readJsonWithSchema,
   type ContestantConfig,
   type ContestantsConfig,
   type Leaderboard,
 } from "../schemas/index.js";
+import { resolveProfile } from "../config/profiles.js";
 
 const PlaywrightPackageSchema = z.object({ version: z.string().min(1) }).passthrough();
 
@@ -60,6 +59,7 @@ export interface CreateGenerationOptions {
   readonly repositoryRoot: string;
   readonly generationsRoot?: string;
   readonly seasonId: string;
+  readonly profileId: string;
   readonly generationId?: string;
   readonly now?: string | Date;
   readonly randomBytes?: (size: number) => Buffer;
@@ -168,17 +168,22 @@ async function listFiles(directory: string, prefix = ""): Promise<string[]> {
   return files.sort();
 }
 
-async function buildSnapshotInputHashes(input: {
+interface SnapshotInputHashesInput {
   readonly repositoryRoot: string;
   readonly seasonRoot: string;
   readonly definition: SeasonDefinition;
   readonly challengeSourcePath: string;
   readonly contestantsSourcePath: string;
   readonly judgesSourcePath: string;
+  readonly profileJsonGenerationPath: string;
   readonly previousGenerationId: string | null;
   readonly previousGenerationPath: string | null;
   readonly previousLeaderboard: Leaderboard | null;
-}): Promise<Record<string, string>> {
+}
+
+async function buildSnapshotInputHashes(
+  input: SnapshotInputHashesInput,
+): Promise<Record<string, string>> {
   const sources = new Map<string, string>();
   const addRepositorySource = (sourcePath: string): void => {
     sources.set(repositoryRelativePath(input.repositoryRoot, sourcePath), sourcePath);
@@ -191,6 +196,10 @@ async function buildSnapshotInputHashes(input: {
   addRepositorySource(join(input.seasonRoot, input.definition.config.starterCss));
   addRepositorySource(join(input.seasonRoot, input.definition.config.fallbackCss));
   addRepositorySource(join(input.seasonRoot, input.definition.config.seedData));
+
+  // The generation-relative durable artifact `config/profile.json` is hashed
+  // from the copy written inside the generation, not from a repository source.
+  sources.set("config/profile.json", input.profileJsonGenerationPath);
 
   for (const directory of [
     join(input.seasonRoot, "fonts"),
@@ -552,18 +561,17 @@ export async function createGeneration(
 
   const seasonRoot = join(repositoryRoot, "challenge", seasonDirectoryName(seasonId));
   const definition = await loadSeasonDefinition(seasonRoot);
-  const contestantsSourcePath = join(repositoryRoot, "config/contestants.yaml");
-  const judgesSourcePath = join(repositoryRoot, "config/judges.yaml");
+  const profile = await resolveProfile(repositoryRoot, options.profileId);
+  const contestantsSourcePath = profile.contestantsPath;
+  const judgesSourcePath = profile.judgesPath;
   const challengeSourcePath = join(seasonRoot, "challenge.yaml");
   const [contestantsSource, judgesSource, challengeSource] = await Promise.all([
     readFile(contestantsSourcePath),
     readFile(judgesSourcePath),
     readFile(challengeSourcePath),
   ]);
-  const [contestantsConfig, judgesConfig] = await Promise.all([
-    readYamlWithSchema(contestantsSourcePath, ContestantsConfigSchema),
-    readYamlWithSchema(judgesSourcePath, JudgesConfigSchema),
-  ]);
+  const contestantsConfig = profile.contestants;
+  const judgesConfig = profile.judges;
 
   if (definition.config.seasonId !== seasonId) {
     throw new Error("requested seasonId does not match challenge configuration");
@@ -739,6 +747,15 @@ export async function createGeneration(
       ),
       copyFile(judgesSourcePath, join(temporaryGenerationPath, "config/judges.yaml")),
     ]);
+    await writeJsonAtomically(
+      join(temporaryGenerationPath, "config/profile.json"),
+      ProfileJsonSchema,
+      {
+        schemaVersion: 1,
+        profileId: profile.profileId,
+        sourcePaths: profile.sourcePaths,
+      },
+    );
 
     requiredHooksArePresent(page.html, definition.config.requiredSelectors);
     await writeFile(
@@ -807,6 +824,7 @@ export async function createGeneration(
       challengeSourcePath,
       contestantsSourcePath,
       judgesSourcePath,
+      profileJsonGenerationPath: join(temporaryGenerationPath, "config/profile.json"),
       previousGenerationId,
       previousGenerationPath,
       previousLeaderboard,

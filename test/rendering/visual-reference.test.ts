@@ -23,6 +23,7 @@ describe("static gallery visual reference", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: generatedAt,
     });

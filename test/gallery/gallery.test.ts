@@ -27,6 +27,7 @@ async function createCompletedFixtureGeneration(
     repositoryRoot: root,
     generationsRoot,
     seasonId: "0001",
+    profileId: "fixture",
     generationId: "0001",
     now: timestamp,
   });
@@ -78,6 +79,7 @@ describe("static public gallery", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: timestamp,
     });
@@ -143,6 +145,7 @@ describe("static public gallery", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: timestamp,
     });
@@ -313,7 +316,7 @@ describe("static public gallery", () => {
         !source.includes(`${join("", ".git")}/`) &&
         !source.endsWith(`${join("", ".git")}`),
     });
-    const judgesPath = join(temporaryRepository, "config/judges.yaml");
+    const judgesPath = join(temporaryRepository, "config/profiles/fixture/judges.yaml");
     await writeFile(
       judgesPath,
       `${await readFile(judgesPath, "utf8")}\n  - id: fixture-critic-c\n    displayName: Fixture Critic C\n    harness:\n      name: fixture-judge\n      version: "1.0.0"\n      adapter: fixture\n      fixture: critic-a\n    model:\n      provider: local-fixture\n      name: critic-c-model\n      version: "1.0.0"\n    budget:\n      timeoutMs: 180000\n      maximumOutputTokens: 4000\n    enabled: true\n`,
@@ -324,6 +327,7 @@ describe("static public gallery", () => {
       repositoryRoot: temporaryRepository,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: timestamp,
     });
@@ -502,6 +506,7 @@ describe("static public gallery", () => {
       repositoryRoot,
       generationsRoot,
       seasonId: "0001",
+      profileId: "fixture",
       generationId: "0001",
       now: timestamp,
     });

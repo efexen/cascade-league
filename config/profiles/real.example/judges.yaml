@@ -1,0 +1,55 @@
+# Example real-run judge profile.
+#
+# Copy the whole directory to config/profiles/real.local/ (git-ignored) and
+# replace every placeholder before running a real generation. The executable
+# paths are deliberately fake placeholders, so `garden verify --profile
+# real.example` reports `command_executable` issues by design while still
+# passing schema validation.
+#
+# environmentAllowlist entries are environment-variable NAMES only. Never
+# write credential values into this file.
+schemaVersion: 2
+defaults:
+  timeoutMs: 180000
+  maximumOutputTokens: 4000
+  concurrencyPerJudge: 2
+resourceGroups:
+  # Judges cap `maximumConcurrency` at 2. This lane must match the contestant
+  # declaration byte-for-byte because it is named in both files.
+  api-lane:
+    maximumConcurrency: 2
+    minimumStartIntervalMs: 1000
+judges:
+  - id: example-vision-judge
+    displayName: Example Vision Judge
+    harness:
+      name: example-harness
+      version: "record-at-run-time"
+      adapter: command
+      command:
+        argv:
+          # PLACEHOLDER: replace with the real absolute executable path.
+          - /absolute/path/to/judge-harness
+          - run
+          - --prompt
+          - "{promptPath}"
+          - --image
+          - "{candidateScreenshotPath}"
+          - --cohort
+          - "{contactSheetPath}"
+          - --output
+          - "{judgmentPath}"
+        environmentAllowlist:
+          # PLACEHOLDER: replace with the real credential variable name.
+          - EXAMPLE_API_KEY
+    model:
+      provider: example-provider
+      name: example-vision-model
+      version: pinned-or-recorded
+    budget:
+      timeoutMs: 180000
+      maximumOutputTokens: 4000
+    execution:
+      resourceGroup: api-lane
+      oneShotEnforcement: enforced
+    enabled: true

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { createGeneration } from "../artifacts/generation.js";
+import { listCheckedInProfiles } from "../config/profiles.js";
 import { buildGallery } from "../gallery/index.js";
 import { runGeneration } from "../orchestration/generation.js";
 import { runWaveB } from "../orchestration/wave-b.js";
@@ -18,10 +19,29 @@ import {
 
 const program = new Command();
 
+// fixture-tournament is the one command that never needs --profile: it always
+// runs against the checked-in "fixture" profile.
+const FIXTURE_PROFILE_ID = "fixture";
+
 interface GenerationLocationOptions {
   readonly generation?: string;
   readonly generationPath?: string;
   readonly generationsRoot?: string;
+}
+
+async function requireProfile(
+  commandName: string,
+  profile: string | undefined,
+): Promise<string> {
+  if (profile !== undefined) return profile;
+  const checkedIn = await listCheckedInProfiles(process.cwd());
+  throw new Error(
+    `--profile is required for ${commandName}; checked-in profiles: ${
+      checkedIn.length > 0
+        ? checkedIn.join(", ")
+        : "(none found under config/profiles/)"
+    }`,
+  );
 }
 
 function existingGenerationPath(options: GenerationLocationOptions): string {
@@ -47,8 +67,10 @@ program.name("garden").description("Local Maxima generation tools").version("0.1
 program
   .command("verify")
   .description("Verify the local runtime and repository inputs")
-  .action(async () => {
-    const report = await verifyRepository(process.cwd());
+  .option("--profile <profile>", "configuration profile under config/profiles/")
+  .action(async (options: { readonly profile?: string }) => {
+    const profileId = await requireProfile("verify", options.profile);
+    const report = await verifyRepository(process.cwd(), profileId);
     if (report.ok) {
       console.log("Local Maxima verification passed.");
     }
@@ -67,17 +89,21 @@ program
     "--season <season>",
     "three-digit season alias or four-digit season ID",
   )
+  .option("--profile <profile>", "configuration profile under config/profiles/")
   .option("--generation <generation>", "explicit four-digit generation ID")
   .option("--generations-root <path>", "root directory for generations")
   .action(
     async (options: {
       season: string;
+      profile?: string;
       generation?: string;
       generationsRoot?: string;
     }) => {
+      const profileId = await requireProfile("create-generation", options.profile);
       const result = await createGeneration({
         repositoryRoot: process.cwd(),
         seasonId: normalizeSeasonId(options.season),
+        profileId,
         ...(options.generation === undefined
           ? {}
           : { generationId: normalizeGenerationId(options.generation) }),
@@ -95,28 +121,41 @@ program
   .command("run-generation")
   .description("Run one generation through scoring and the public gallery")
   .option("--season <season>", "create a generation for this season")
+  .option("--profile <profile>", "configuration profile when creating a generation")
   .option("--generation <generation>", "existing four-digit generation ID")
   .option("--generation-path <path>", "existing generation directory")
   .option("--generations-root <path>", "root directory for an existing generation")
-  .action(async (options: GenerationLocationOptions & { readonly season?: string }) => {
-    const seasonId =
-      options.season === undefined ? undefined : normalizeSeasonId(options.season);
-    const generationPath =
-      options.generation === undefined && options.generationPath === undefined
-        ? undefined
-        : existingGenerationPath(options);
-    const result = await runGeneration({
-      repositoryRoot: process.cwd(),
-      ...(seasonId === undefined ? {} : { seasonId }),
-      ...(generationPath === undefined ? {} : { generationPath }),
-      ...(options.generationsRoot === undefined
-        ? {}
-        : { generationsRoot: resolve(options.generationsRoot) }),
-      onProgress: progress(),
-    });
-    console.log(`[${result.generationId}] generation: ${result.generationPath}`);
-    console.log(`[${result.generationId}] gallery: ${result.gallery.publicPath}`);
-  });
+  .action(
+    async (
+      options: GenerationLocationOptions & {
+        readonly season?: string;
+        readonly profile?: string;
+      },
+    ) => {
+      const seasonId =
+        options.season === undefined ? undefined : normalizeSeasonId(options.season);
+      const profileId =
+        seasonId === undefined
+          ? undefined
+          : await requireProfile("run-generation", options.profile);
+      const generationPath =
+        options.generation === undefined && options.generationPath === undefined
+          ? undefined
+          : existingGenerationPath(options);
+      const result = await runGeneration({
+        repositoryRoot: process.cwd(),
+        ...(seasonId === undefined ? {} : { seasonId }),
+        ...(profileId === undefined ? {} : { profileId }),
+        ...(generationPath === undefined ? {} : { generationPath }),
+        ...(options.generationsRoot === undefined
+          ? {}
+          : { generationsRoot: resolve(options.generationsRoot) }),
+        onProgress: progress(),
+      });
+      console.log(`[${result.generationId}] generation: ${result.generationPath}`);
+      console.log(`[${result.generationId}] gallery: ${result.gallery.publicPath}`);
+    },
+  );
 
 program
   .command("resume-generation")
@@ -193,6 +232,7 @@ program
       repositoryRoot: process.cwd(),
       generationsRoot,
       seasonId: "0001",
+      profileId: FIXTURE_PROFILE_ID,
     });
     const result = await runGeneration({
       repositoryRoot: process.cwd(),
@@ -208,18 +248,24 @@ program
   .command("run-wave-b")
   .description("Run contestants, validation, rendering, anonymous judging, and awards")
   .option("--season <season>", "three-digit season alias or four-digit season ID")
+  .option("--profile <profile>", "configuration profile when creating a generation")
   .option("--generation <generation>", "accept an existing four-digit generation ID")
   .option("--generation-path <path>", "accept an existing generation directory")
   .option("--generations-root <path>", "root directory for newly created generations")
   .action(
     async (options: {
       season?: string;
+      profile?: string;
       generation?: string;
       generationPath?: string;
       generationsRoot?: string;
     }) => {
       const seasonId =
         options.season === undefined ? undefined : normalizeSeasonId(options.season);
+      const profileId =
+        seasonId === undefined
+          ? undefined
+          : await requireProfile("run-wave-b", options.profile);
       const generationId =
         options.generation === undefined
           ? undefined
@@ -247,6 +293,7 @@ program
       const result = await runWaveB({
         repositoryRoot: process.cwd(),
         ...(seasonId === undefined ? {} : { seasonId }),
+        ...(profileId === undefined ? {} : { profileId }),
         ...(existingGenerationPath === undefined
           ? {}
           : { generationPath: existingGenerationPath }),

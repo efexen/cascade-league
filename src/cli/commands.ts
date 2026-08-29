@@ -6,13 +6,8 @@ import { chromium } from "playwright";
 import sharp from "sharp";
 
 import { loadSeasonDefinition } from "../challenge/index.js";
-import {
-  ContestantsConfigSchema,
-  JudgesConfigSchema,
-  readYamlWithSchema,
-  type ContestantsConfig,
-  type JudgesConfig,
-} from "../schemas/index.js";
+import { resolveProfile } from "../config/profiles.js";
+import { type ContestantsConfig, type JudgesConfig } from "../schemas/index.js";
 
 export function normalizeSeasonId(value: string): string {
   if (/^\d{3}$/.test(value)) {
@@ -82,6 +77,7 @@ async function commandExecutables(
 
 export async function verifyRepository(
   repositoryRoot: string,
+  profileId: string,
 ): Promise<VerificationReport> {
   const issues: VerificationIssue[] = [];
   const root = join(repositoryRoot);
@@ -103,26 +99,15 @@ export async function verifyRepository(
   let contestants: ContestantsConfig | undefined;
   let judges: JudgesConfig | undefined;
   try {
-    contestants = await readYamlWithSchema(
-      join(root, "config/contestants.yaml"),
-      ContestantsConfigSchema,
-    );
+    const profile = await resolveProfile(root, profileId);
+    contestants = profile.contestants;
+    judges = profile.judges;
   } catch (error) {
     issues.push(
       issue(
-        "contestants_config",
+        "profile_resolution",
         error instanceof Error ? error.message : String(error),
       ),
-    );
-  }
-  try {
-    judges = await readYamlWithSchema(
-      join(root, "config/judges.yaml"),
-      JudgesConfigSchema,
-    );
-  } catch (error) {
-    issues.push(
-      issue("judges_config", error instanceof Error ? error.message : String(error)),
     );
   }
 

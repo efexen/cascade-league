@@ -1,0 +1,90 @@
+# Example real-run contestant profile.
+#
+# This file is a checked-in template, not an executable roster. Copy the whole
+# directory to config/profiles/real.local/ (git-ignored) and replace every
+# placeholder before running a real generation.
+#
+# The executable paths below are deliberately fake absolute placeholders, so
+# `garden verify --profile real.example` is expected to report
+# `command_executable` issues by design. It must still report no schema
+# failures.
+#
+# environmentAllowlist entries are environment-variable NAMES only. Never
+# write credential values into this file.
+schemaVersion: 2
+defaults:
+  timeoutMs: 480000
+  maximumTotalTokens: 30000
+  maximumSubmissionBytes: 61440
+  concurrency: 4
+resourceGroups:
+  # Provider rate-limit lanes. `maximumConcurrency` for contestants is between
+  # 1 and 4; `minimumStartIntervalMs` is between 0 and 60000. A group declared
+  # in both contestant and judge files must declare identical values.
+  api-lane:
+    maximumConcurrency: 2
+    minimumStartIntervalMs: 1000
+  local-lane:
+    maximumConcurrency: 4
+    minimumStartIntervalMs: 0
+contestants:
+  - id: example-harness-example-model
+    displayName: Example Harness + Example Model
+    harness:
+      name: example-harness
+      version: "record-at-run-time"
+      adapter: command
+      command:
+        argv:
+          # PLACEHOLDER: replace with the real absolute executable path.
+          - /absolute/path/to/harness
+          - run
+          - --prompt
+          - "{promptPath}"
+          - --output
+          - "{submissionPath}"
+        environmentAllowlist:
+          # PLACEHOLDER: replace with the real credential variable name.
+          - EXAMPLE_API_KEY
+    model:
+      provider: example-provider
+      name: example-model
+      version: pinned-or-recorded
+      reasoningEffort: medium
+    budget:
+      timeoutMs: 480000
+      maximumTotalTokens: 30000
+    execution:
+      resourceGroup: api-lane
+      oneShotEnforcement: enforced
+    enabled: true
+  - id: second-example-harness-second-example-model
+    displayName: Second Example Harness + Second Example Model
+    harness:
+      name: second-example-harness
+      version: "record-at-run-time"
+      adapter: command
+      command:
+        argv:
+          # PLACEHOLDER: replace with the real absolute executable path.
+          - /absolute/path/to/second-harness
+          - run
+          - --prompt
+          - "{promptPath}"
+          - --output
+          - "{submissionPath}"
+        environmentAllowlist:
+          # PLACEHOLDER: replace with the real credential variable name.
+          - SECOND_EXAMPLE_API_KEY
+    model:
+      provider: second-example-provider
+      name: second-example-model
+      version: pinned-or-recorded
+      reasoningEffort: medium
+    budget:
+      timeoutMs: 480000
+      maximumTotalTokens: 30000
+    execution:
+      resourceGroup: local-lane
+      oneShotEnforcement: prompt_only
+    enabled: true

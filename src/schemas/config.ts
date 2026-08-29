@@ -3,7 +3,9 @@ import { z } from "zod";
 import {
   ContestantIdSchema,
   JudgeIdSchema,
+  NonNegativeIntegerSchema,
   PositiveIntegerSchema,
+  ProfileIdSchema,
   RelativePosixPathSchema,
   ReasoningEffortSchema,
   SchemaVersionSchema,
@@ -167,6 +169,61 @@ const JudgeBudgetSchema = z
   })
   .strict();
 
+// Run configuration (contestants and judges) tolerates schemaVersion 1 and 2
+// and normalises both into one internal type. v1 documents simply omit the
+// v2-only optional fields; on-disk files are never mutated.
+export const RunConfigSchemaVersionSchema = z.union([z.literal(1), z.literal(2)]);
+
+const MinimumStartIntervalMsSchema = NonNegativeIntegerSchema.max(60000);
+
+function resourceGroupsSchema(maximumConcurrency: number) {
+  return z.record(
+    SlugSchema,
+    z
+      .object({
+        maximumConcurrency: PositiveIntegerSchema.max(maximumConcurrency),
+        minimumStartIntervalMs: MinimumStartIntervalMsSchema,
+      })
+      .strict(),
+  );
+}
+
+const EntryExecutionSchema = z
+  .object({
+    resourceGroup: SlugSchema,
+    oneShotEnforcement: z.enum(["enforced", "prompt_only"]),
+  })
+  .strict();
+
+function undeclaredResourceGroups(
+  resourceGroups:
+    | Record<
+        string,
+        { readonly maximumConcurrency: number; readonly minimumStartIntervalMs: number }
+      >
+    | undefined,
+  entries: readonly {
+    readonly enabled: boolean;
+    readonly harness: { readonly adapter: string };
+    readonly execution?: { readonly resourceGroup: string } | undefined;
+  }[],
+): string[] {
+  const declared = new Set(Object.keys(resourceGroups ?? {}));
+  const undeclared: string[] = [];
+  for (const entry of entries) {
+    const group = entry.execution?.resourceGroup;
+    if (
+      entry.enabled &&
+      entry.harness.adapter === "command" &&
+      group !== undefined &&
+      !declared.has(group)
+    ) {
+      undeclared.push(group);
+    }
+  }
+  return undeclared;
+}
+
 export const ChallengeConfigSchema = z
   .object({
     schemaVersion: SchemaVersionSchema,
@@ -224,13 +281,14 @@ const ContestantSchema = z
     harness: ContestantHarnessSchema,
     model: ModelSchema,
     budget: ContestantBudgetSchema.optional(),
+    execution: EntryExecutionSchema.optional(),
     enabled: z.boolean(),
   })
   .strict();
 
 export const ContestantsConfigSchema = z
   .object({
-    schemaVersion: SchemaVersionSchema,
+    schemaVersion: RunConfigSchemaVersionSchema,
     defaults: z
       .object({
         timeoutMs: PositiveIntegerSchema,
@@ -239,6 +297,7 @@ export const ContestantsConfigSchema = z
         concurrency: PositiveIntegerSchema.max(4),
       })
       .strict(),
+    resourceGroups: resourceGroupsSchema(4).optional(),
     contestants: z.array(ContestantSchema).min(2).max(6),
   })
   .strict()
@@ -251,6 +310,16 @@ export const ContestantsConfigSchema = z
         message: "contestant IDs must be unique",
       });
     }
+    for (const group of undeclaredResourceGroups(
+      config.resourceGroups,
+      config.contestants,
+    )) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["contestants"],
+        message: `an enabled command contestant references resource group "${group}" which is not declared in this file`,
+      });
+    }
   });
 
 const JudgeSchema = z
@@ -260,13 +329,14 @@ const JudgeSchema = z
     harness: JudgeHarnessSchema,
     model: ModelSchema,
     budget: JudgeBudgetSchema.optional(),
+    execution: EntryExecutionSchema.optional(),
     enabled: z.boolean(),
   })
   .strict();
 
 export const JudgesConfigSchema = z
   .object({
-    schemaVersion: SchemaVersionSchema,
+    schemaVersion: RunConfigSchemaVersionSchema,
     defaults: z
       .object({
         timeoutMs: PositiveIntegerSchema,
@@ -274,6 +344,7 @@ export const JudgesConfigSchema = z
         concurrencyPerJudge: PositiveIntegerSchema.max(2),
       })
       .strict(),
+    resourceGroups: resourceGroupsSchema(2).optional(),
     judges: z.array(JudgeSchema).min(1),
   })
   .strict()
@@ -286,6 +357,16 @@ export const JudgesConfigSchema = z
         message: "judge IDs must be unique",
       });
     }
+    for (const group of undeclaredResourceGroups(
+      config.resourceGroups,
+      config.judges,
+    )) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["judges"],
+        message: `an enabled command judge references resource group "${group}" which is not declared in this file`,
+      });
+    }
   });
 
 export type ChallengeConfig = z.infer<typeof ChallengeConfigSchema>;
@@ -294,6 +375,27 @@ export type JudgesConfig = z.infer<typeof JudgesConfigSchema>;
 export type ContestantConfig = ContestantsConfig["contestants"][number];
 export type JudgeConfig = JudgesConfig["judges"][number];
 export type ContestantCommand = z.infer<ReturnType<typeof commandSchema>>;
+export type ResourceGroupsConfig = z.infer<ReturnType<typeof resourceGroupsSchema>>;
+
+// The durable `config/profile.json` artifact written into every generation.
+// Its schemaVersion is the artifact version (always 1), independent of the
+// schemaVersion of the run configuration files it names. The profile
+// identifier accepts the dotted template/operator names required by the
+// profile layout (for example `real.example`).
+export const ProfileJsonSchema = z
+  .object({
+    schemaVersion: SchemaVersionSchema,
+    profileId: ProfileIdSchema,
+    sourcePaths: z
+      .object({
+        contestants: RelativePosixPathSchema,
+        judges: RelativePosixPathSchema,
+      })
+      .strict(),
+  })
+  .strict();
+
+export type ProfileJson = z.infer<typeof ProfileJsonSchema>;
 
 // Keep the placeholder shape checked at schema construction time as well as at
 // parse time. This makes accidental changes to the allowlist visible to tests.

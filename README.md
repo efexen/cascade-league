@@ -20,12 +20,57 @@ Install deterministically and install the pinned browser once:
 corepack enable
 pnpm install --frozen-lockfile
 pnpm exec playwright install chromium
-pnpm garden verify
+pnpm garden verify --profile fixture
 ```
 
-`verify` performs no model calls. It checks the runtime, configuration,
-challenge assets, bundled Chromium, and executable paths for enabled command
-adapters.
+`verify` performs no model calls. It checks the runtime, the selected
+configuration profile, challenge assets, bundled Chromium, and executable paths
+for enabled command adapters.
+
+## Configuration profiles
+
+Run configuration lives in named profiles under `config/profiles/`:
+
+```text
+config/
+  profiles/
+    fixture/        checked in; deterministic offline roster
+      contestants.yaml
+      judges.yaml
+    real.example/   checked in; placeholder template, no credentials
+      contestants.yaml
+      judges.yaml
+    real.local/     git-ignored; the normal operator profile for real runs
+      contestants.yaml
+      judges.yaml
+```
+
+- Every general command that reads or creates a generation requires an
+  explicit `--profile`; there is no silent default. Only
+  `fixture-tournament` needs no flag because it always runs the checked-in
+  `fixture` profile.
+- A profile ID is a lowercase hyphenated slug, optionally dot-separated into
+  more slug segments (`fixture`, `real.example`, `real.local`). Path
+  separators, `.`/`..` traversal, symlinked profile directories or files, and
+  missing YAML files are rejected before any configuration is read.
+- `garden verify --profile real.example` intentionally reports
+  `command_executable` errors because the template ships fake absolute
+  executable paths; it must report no schema failures.
+- For a real run, copy `config/profiles/real.example/` to
+  `config/profiles/real.local/`, replace every placeholder, and pass
+  `--profile real.local`. `real.local` is git-ignored; never commit
+  credentials.
+- Each generation copies the selected files verbatim into the canonical
+  `config/contestants.yaml` and `config/judges.yaml` paths and writes
+  `config/profile.json` (artifact `schemaVersion`, `profileId`, and
+  repository-relative source paths). All three are hashed into
+  `challenge/snapshot.json#inputHashes`. Completed generations always rebuild
+  from their copied configuration, never from the currently selected profile.
+- Run configuration is version tolerant: `schemaVersion: 1` (Phase 1) and
+  `schemaVersion: 2` (adds `resourceGroups` and per-entry `execution`
+  declarations) both parse into one internal shape. Archived v1 files are
+  never mutated. v2 resource groups are validated in this phase but not yet
+  scheduled.
 
 ## Offline fixture tournament
 
@@ -49,13 +94,18 @@ overwriting a prior generation.
 ## Generation lifecycle
 
 ```sh
-pnpm garden create-generation --season 001 --generations-root /tmp/local-maxima-runs
-pnpm garden run-generation --season 001 --generations-root /tmp/local-maxima-runs
+pnpm garden create-generation --season 001 --profile fixture --generations-root /tmp/local-maxima-runs
+pnpm garden run-generation --season 001 --profile fixture --generations-root /tmp/local-maxima-runs
 pnpm garden run-generation --generation 0001 --generations-root /tmp/local-maxima-runs
 pnpm garden resume-generation --generation 0001 --generations-root /tmp/local-maxima-runs
 pnpm garden build-gallery --generation 0001 --generations-root /tmp/local-maxima-runs
 pnpm garden serve-gallery --generation 0001 --generations-root /tmp/local-maxima-runs
 ```
+
+`--profile` is required whenever a command creates a new generation
+(`create-generation`, `run-generation --season`, `run-wave-b --season`) or
+verifies the repository. Commands that act on an existing generation read the
+generation's copied configuration instead.
 
 Use `--generation-path /absolute/path/to/generation` instead of an ID and root
 when inspecting an archived generation. `run-generation` can create a new
@@ -95,7 +145,9 @@ Judge placeholders:
 
 For example, a command harness entry has `adapter: command`, an absolute
 `command.argv`, and an `environmentAllowlist` containing only uppercase
-environment variable names. Keep provider credentials out of YAML. The
+environment variable names. Configure real harnesses in
+`config/profiles/real.local/` (copied from the checked-in `real.example`
+template). Keep provider credentials out of YAML. The
 adapter copies only allowlisted variables into the child process and redacts
 those values in private stdout/stderr logs. Never put a secret, prompt, raw
 model response, or usage/cost value in a public template or public metadata.
