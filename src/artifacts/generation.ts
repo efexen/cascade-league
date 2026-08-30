@@ -38,6 +38,7 @@ import {
   LeaderboardSchema,
   ManifestSchema,
   ProfileJsonSchema,
+  RunPlanSchema,
   RunSchema,
   SnapshotSchema,
   SeasonIdSchema,
@@ -48,6 +49,8 @@ import {
   type Leaderboard,
 } from "../schemas/index.js";
 import { resolveProfile } from "../config/profiles.js";
+import { buildRunPlan } from "../planning/index.js";
+import { runRepositoryPreflight } from "../preflight/index.js";
 
 const PlaywrightPackageSchema = z.object({ version: z.string().min(1) }).passthrough();
 
@@ -63,6 +66,8 @@ export interface CreateGenerationOptions {
   readonly generationId?: string;
   readonly now?: string | Date;
   readonly randomBytes?: (size: number) => Buffer;
+  readonly acceptPromptOnlyOneShot?: boolean;
+  readonly environment?: NodeJS.ProcessEnv;
 }
 
 export interface CreatedGeneration {
@@ -74,6 +79,28 @@ export interface CreatedGeneration {
 
 function seasonDirectoryName(seasonId: string): string {
   return `season-${Number.parseInt(seasonId, 10).toString().padStart(3, "0")}`;
+}
+
+export { seasonDirectoryName };
+
+/**
+ * The exact bytes `create-generation` writes to `config/profile.json`. The
+ * plan-generation preview hashes these canonical bytes so its
+ * `configSnapshotHashes` match the persisted plan byte for byte.
+ */
+export function profileJsonBytes(profile: {
+  readonly profileId: string;
+  readonly sourcePaths: {
+    readonly contestants: string;
+    readonly judges: string;
+  };
+}): string {
+  const validated = ProfileJsonSchema.parse({
+    schemaVersion: 1,
+    profileId: profile.profileId,
+    sourcePaths: profile.sourcePaths,
+  });
+  return `${JSON.stringify(validated, null, 2)}\n`;
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -176,6 +203,7 @@ interface SnapshotInputHashesInput {
   readonly contestantsSourcePath: string;
   readonly judgesSourcePath: string;
   readonly profileJsonGenerationPath: string;
+  readonly runPlanGenerationPath: string;
   readonly previousGenerationId: string | null;
   readonly previousGenerationPath: string | null;
   readonly previousLeaderboard: Leaderboard | null;
@@ -200,6 +228,8 @@ async function buildSnapshotInputHashes(
   // The generation-relative durable artifact `config/profile.json` is hashed
   // from the copy written inside the generation, not from a repository source.
   sources.set("config/profile.json", input.profileJsonGenerationPath);
+  // `run-plan.json` is likewise a generation-relative private durable artifact.
+  sources.set("run-plan.json", input.runPlanGenerationPath);
 
   for (const directory of [
     join(input.seasonRoot, "fonts"),
@@ -439,6 +469,8 @@ async function allocateGenerationId(generationsRoot: string): Promise<string> {
   return next.toString().padStart(4, "0");
 }
 
+export { allocateGenerationId };
+
 function requiredHooksArePresent(html: string, selectors: readonly string[]): void {
   for (const selector of selectors) {
     const escaped = selector.slice(1).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -562,6 +594,33 @@ export async function createGeneration(
   const seasonRoot = join(repositoryRoot, "challenge", seasonDirectoryName(seasonId));
   const definition = await loadSeasonDefinition(seasonRoot);
   const profile = await resolveProfile(repositoryRoot, options.profileId);
+  const preflight = await runRepositoryPreflight(repositoryRoot, options.profileId, {
+    seasonId,
+    ...(options.environment === undefined ? {} : { environment: options.environment }),
+  });
+  const preflightErrors = preflight.issues.filter(
+    (entry) => entry.severity === "error",
+  );
+  if (preflightErrors.length > 0) {
+    throw new Error(
+      `create-generation preflight failed: ${preflightErrors
+        .map((entry) => `${entry.code}: ${entry.message}`)
+        .join("; ")}`,
+    );
+  }
+  const promptOnlyContestants = profile.contestants.contestants.filter(
+    (contestant) =>
+      contestant.enabled &&
+      contestant.harness.adapter === "command" &&
+      contestant.execution?.oneShotEnforcement === "prompt_only",
+  );
+  if (promptOnlyContestants.length > 0 && options.acceptPromptOnlyOneShot !== true) {
+    throw new Error(
+      `create-generation requires explicit prompt-only one-shot acceptance for: ${promptOnlyContestants
+        .map((contestant) => contestant.id)
+        .join(", ")}; rerun with --accept-prompt-only-one-shot`,
+    );
+  }
   const contestantsSourcePath = profile.contestantsPath;
   const judgesSourcePath = profile.judgesPath;
   const challengeSourcePath = join(seasonRoot, "challenge.yaml");
@@ -757,6 +816,34 @@ export async function createGeneration(
       },
     );
 
+    // The immutable private `run-plan.json` is built from the exact copied
+    // configuration bytes so its snapshot hashes match the plan-generation
+    // preview byte for byte. It is written once, never rebuilt, and never
+    // copied into `public/`.
+    const runPlanPath = join(temporaryGenerationPath, "run-plan.json");
+    await writeJsonAtomically(
+      runPlanPath,
+      RunPlanSchema,
+      buildRunPlan({
+        profile,
+        seasonId,
+        generationId,
+        previousGenerationId,
+        configSnapshotHashes: {
+          "config/contestants.yaml": await sha256File(
+            join(temporaryGenerationPath, "config/contestants.yaml"),
+          ),
+          "config/judges.yaml": await sha256File(
+            join(temporaryGenerationPath, "config/judges.yaml"),
+          ),
+          "config/profile.json": await sha256File(
+            join(temporaryGenerationPath, "config/profile.json"),
+          ),
+        },
+        promptOnlyOneShotAccepted: options.acceptPromptOnlyOneShot === true,
+      }),
+    );
+
     requiredHooksArePresent(page.html, definition.config.requiredSelectors);
     await writeFile(
       join(temporaryGenerationPath, "challenge/challenge.html"),
@@ -825,6 +912,7 @@ export async function createGeneration(
       contestantsSourcePath,
       judgesSourcePath,
       profileJsonGenerationPath: join(temporaryGenerationPath, "config/profile.json"),
+      runPlanGenerationPath: runPlanPath,
       previousGenerationId,
       previousGenerationPath,
       previousLeaderboard,

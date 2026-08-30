@@ -824,8 +824,15 @@ describe("Wave-B fixture orchestration", () => {
         join(repositoryRoot, "config/profiles/fixture/contestants.yaml"),
         "utf8",
       ),
-    ) as { defaults: Record<string, unknown>; contestants: Record<string, unknown>[] };
+    ) as {
+      defaults: Record<string, unknown>;
+      resourceGroups?: Record<string, unknown>;
+      contestants: Record<string, unknown>[];
+    };
     contestantsConfig.defaults.concurrency = 1;
+    contestantsConfig.resourceGroups = {
+      "tamper-lane": { maximumConcurrency: 1, minimumStartIntervalMs: 0 },
+    };
     contestantsConfig.contestants[0]!.harness = {
       name: "tampering-command",
       version: "1.0.0",
@@ -836,9 +843,14 @@ describe("Wave-B fixture orchestration", () => {
           join(mirrorRoot, "tamper.mjs"),
           "{workspacePath}",
           "{submissionPath}",
+          "{promptPath}",
         ],
         environmentAllowlist: [],
       },
+    };
+    contestantsConfig.contestants[0]!.execution = {
+      resourceGroup: "tamper-lane",
+      oneShotEnforcement: "enforced",
     };
     await writeFile(
       join(mirrorRoot, "config/profiles/fixture/contestants.yaml"),
@@ -878,6 +890,7 @@ describe("Wave-B fixture orchestration", () => {
     const result = await runWaveB({
       repositoryRoot: mirrorRoot,
       generationPath: generation.generationPath,
+      allowModelCalls: true,
       contestantAdapters: new Map(
         ["fixture-geometric", "fixture-generic"].map((id) => [
           id,
@@ -907,8 +920,15 @@ describe("Wave-B fixture orchestration", () => {
         join(repositoryRoot, "config/profiles/fixture/contestants.yaml"),
         "utf8",
       ),
-    ) as { defaults: Record<string, unknown>; contestants: Record<string, unknown>[] };
+    ) as {
+      defaults: Record<string, unknown>;
+      resourceGroups?: Record<string, unknown>;
+      contestants: Record<string, unknown>[];
+    };
     contestantsConfig.defaults.concurrency = 1;
+    contestantsConfig.resourceGroups = {
+      "tamper-lane": { maximumConcurrency: 1, minimumStartIntervalMs: 0 },
+    };
     contestantsConfig.contestants[0]!.harness = {
       name: "canonical-tampering-command",
       version: "1.0.0",
@@ -919,9 +939,14 @@ describe("Wave-B fixture orchestration", () => {
           join(mirrorRoot, "tamper-canonical.mjs"),
           "{workspacePath}",
           "{submissionPath}",
+          "{promptPath}",
         ],
         environmentAllowlist: [],
       },
+    };
+    contestantsConfig.contestants[0]!.execution = {
+      resourceGroup: "tamper-lane",
+      oneShotEnforcement: "enforced",
     };
     await writeFile(
       join(mirrorRoot, "config/profiles/fixture/contestants.yaml"),
@@ -961,6 +986,7 @@ describe("Wave-B fixture orchestration", () => {
       runWaveB({
         repositoryRoot: mirrorRoot,
         generationPath: generation.generationPath,
+        allowModelCalls: true,
         contestantAdapters: new Map(
           ["fixture-geometric", "fixture-generic"].map((id) => [
             id,

@@ -19,6 +19,7 @@ import {
   ContestantsConfigSchema,
   LeaderboardSchema,
   ManifestSchema,
+  RunPlanSchema,
   SnapshotSchema,
   readYamlWithSchema,
 } from "../../src/schemas/index.js";
@@ -208,6 +209,57 @@ describe("immutable generation creation", () => {
       "fixture-geometric",
       "fixture-generic",
     ]);
+  });
+
+  it("writes run-plan.json, validates it, and hashes it into the snapshot", async () => {
+    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const result = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      profileId: "fixture",
+      now: timestamp,
+    });
+    const runPlanPath = join(result.generationPath, "run-plan.json");
+    const runPlanText = await readFile(runPlanPath, "utf8");
+    const plan = RunPlanSchema.parse(JSON.parse(runPlanText) as unknown);
+    expect(plan.schemaVersion).toBe(1);
+    expect(plan.seasonId).toBe("0001");
+    expect(plan.generationId).toBe("0001");
+    expect(plan.previousGenerationId).toBeNull();
+    expect(plan.profileId).toBe("fixture");
+    expect(plan.externalModelCallsRequired).toBe(false);
+    expect(plan.callCounts.maximumTotalCalls).toBe(11);
+    expect(plan.promptOnlyOneShot).toEqual([]);
+    expect(plan.promptOnlyOneShotAccepted).toBe(false);
+
+    expect(plan.configSnapshotHashes).toEqual({
+      "config/contestants.yaml": await sha256(
+        join(result.generationPath, "config/contestants.yaml"),
+      ),
+      "config/judges.yaml": await sha256(
+        join(result.generationPath, "config/judges.yaml"),
+      ),
+      "config/profile.json": await sha256(
+        join(result.generationPath, "config/profile.json"),
+      ),
+    });
+
+    const snapshot = SnapshotSchema.parse(
+      JSON.parse(
+        await readFile(join(result.generationPath, "challenge/snapshot.json"), "utf8"),
+      ) as unknown,
+    );
+    expect(snapshot.inputHashes["run-plan.json"]).toBe(
+      createHash("sha256").update(runPlanText).digest("hex"),
+    );
+
+    // The plan is private: it never appears in public gallery output.
+    expect(runPlanPath).toContain(result.generationPath);
+    expect(
+      await filesUnder(join(result.generationPath, "public")).catch(() => []),
+    ).toEqual([]);
   });
 
   it("rejects unknown, symlinked, or traversal profile identifiers at creation", async () => {

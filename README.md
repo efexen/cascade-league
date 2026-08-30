@@ -25,7 +25,17 @@ pnpm garden verify --profile fixture
 
 `verify` performs no model calls. It checks the runtime, the selected
 configuration profile, challenge assets, bundled Chromium, and executable paths
-for enabled command adapters.
+for enabled command adapters. It also checks, without executing any configured
+command: the enabled roster size (two to six contestants and at least one
+judge), that every allowlisted environment variable is present in the operator
+environment, `$NAME`/`${NAME}` references inside argv values (an error when the
+name is not allowlisted, a warning when it is, because argv runs with
+`shell: false` and never expands them), placeholder compatibility of each
+enabled command entry (contestants need `{promptPath}` and `{submissionPath}`;
+judges need `{promptPath}` plus `{judgmentPath}` or `{awardsPath}`), pinned
+non-generic `harness.version`/`model.version` values for enabled command
+entries, and it warns when an enabled command contestant relies on prompt-only
+one-shot enforcement.
 
 ## Configuration profiles
 
@@ -69,8 +79,61 @@ config/
 - Run configuration is version tolerant: `schemaVersion: 1` (Phase 1) and
   `schemaVersion: 2` (adds `resourceGroups` and per-entry `execution`
   declarations) both parse into one internal shape. Archived v1 files are
-  never mutated. v2 resource groups are validated in this phase but not yet
-  scheduled.
+  never mutated. At profile resolution every enabled command entry must declare
+  `execution.resourceGroup` naming a group declared in the same file; fixture
+  entries are exempt. v2 resource groups are validated and reported in the run
+  plan in this phase but not yet scheduled.
+
+## Planning a generation
+
+Before creating a generation, preview and validate it without writing anything
+or making a model call:
+
+```sh
+pnpm garden plan-generation --season 001 --profile fixture
+```
+
+`plan-generation` requires `--profile`, computes the next generation ID exactly
+as `create-generation` would, runs the full `verify` preflight plus the same
+season-continuity checks `create-generation` performs (so a plan failure
+predicts a create failure), and prints the complete run plan: enabled
+contestant and judge identities, whether external model calls are required, the
+contestant / candidate-judging / awards call counts and their maximum total,
+each entry's configured timeout and token ceilings, each resource group's
+concurrency and start pacing, which entries cannot report usage/cost (their
+argv lacks `{usageOutputPath}`), and which contestants rely on prompt-only
+one-shot enforcement. It exits nonzero on any preflight error and writes
+nothing.
+
+`create-generation` persists this same validated plan as `run-plan.json` at the
+generation root, hashes it into `challenge/snapshot.json#inputHashes` under the
+`run-plan.json` key, and treats it as a private, write-once artifact: it is
+never rebuilt, never mutated, and never copied into `public/`.
+
+## Explicit external-model-call consent
+
+Any generation whose copied configuration contains an enabled command
+contestant or command judge may make external (potentially paid) model calls.
+`run-generation`, `run-wave-b`, and `resume-generation` refuse such a generation
+before they change any state unless you pass `--allow-model-calls`:
+
+```sh
+pnpm garden run-generation --generation 0001 --generations-root /tmp/local-maxima-runs --allow-model-calls
+```
+
+The refusal names the number and kind of pending calls (honestly labelled as
+maximums when exact counts are not yet known) and never leaks secrets, prompts,
+or executable paths. The grant is not persisted: a `resume-generation` that
+still has pending command tasks must pass `--allow-model-calls` again, while a
+resume whose command tasks are all terminal (for example, finishing scoring and
+the gallery) proceeds without it. `create-generation`, `verify`,
+`plan-generation`, `build-gallery`, and `serve-gallery` never require it, and
+`fixture-tournament` is fixture-only.
+
+A command contestant whose `execution.oneShotEnforcement` is `prompt_only` is
+not sandboxed against a second attempt. `plan-generation` refuses such a roster
+unless you pass `--accept-prompt-only-one-shot`, which records the acceptance in
+the plan.
 
 ## Offline fixture tournament
 
@@ -155,18 +218,19 @@ model response, or usage/cost value in a public template or public metadata.
 ## Artifacts and inspection
 
 Each generation contains immutable snapshots under `config/` and `challenge/`,
-per-contestant `identity.json`, `run.json`, `validation.json`, sanitised CSS and
-screenshots, anonymous judge artifacts under `judging/`, private logs under
-`logs/`, and derived `leaderboard.json` and `public/` output. The anonymous map,
-raw judge output, prompts, workspaces, usage, logs, and competitor CSS remain
-private. Public output contains only `index.html`, `metadata.json`,
-`champion.css`, neutral filenames for screenshots, local fonts, and
-`gallery-screenshot.png`.
+a private `run-plan.json`, per-contestant `identity.json`, `run.json`,
+`validation.json`, sanitised CSS and screenshots, anonymous judge artifacts
+under `judging/`, private logs under `logs/`, and derived `leaderboard.json`
+and `public/` output. The anonymous map, raw judge output, prompts, workspaces,
+usage, logs, and competitor CSS remain private. Public output contains only
+`index.html`, `metadata.json`, `champion.css`, neutral filenames for
+screenshots, local fonts, and `gallery-screenshot.png`.
 
 Useful checks:
 
 ```sh
 cat /absolute/path/to/generation/manifest.json
+cat /absolute/path/to/generation/run-plan.json
 cat /absolute/path/to/generation/leaderboard.json
 find /absolute/path/to/generation/public -type f -print
 open /absolute/path/to/generation/public/index.html
@@ -182,9 +246,12 @@ why.
 ## First real-run gate and limits
 
 Before a real run, review challenge copy and bundled-font licences, configure at
-least two contestants, verify each timeout and credential allowlist, and run a
-small smoke generation with two contestants and one judge. Treat that result as
-an operational check, not a meaningful fairness or reproducibility claim.
+least two contestants, verify each timeout and credential allowlist, and run
+`plan-generation` to see the exact roster, call counts, ceilings, resource
+groups, and any usage/prompt-only caveats before spending. Then run a small
+smoke generation with two contestants and one judge, granting
+`--allow-model-calls` on the run commands. Treat that result as an operational
+check, not a meaningful fairness or reproducibility claim.
 
 Phase 1 deliberately defers scheduling, public deployment, databases, mobile
 renders, iterative browser inspection, visual-neighbour analysis, pairwise

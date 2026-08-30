@@ -249,6 +249,118 @@ describe("named configuration profiles", () => {
     expect(gitignore.split("\n")).toContain("config/profiles/real.local/");
   });
 
+  it("requires every enabled command entry to name a declared resource group", async () => {
+    const commandEntry = (id: string, execution?: unknown) => ({
+      id,
+      displayName: `Command ${id}`,
+      harness: {
+        name: "example-harness",
+        version: "2.1.0",
+        adapter: "command",
+        command: {
+          argv: ["/absolute/path/to/harness", "{promptPath}", "{submissionPath}"],
+          environmentAllowlist: [],
+        },
+      },
+      model: { provider: "example", name: "example-model", version: "1.2.3" },
+      ...(execution === undefined
+        ? {}
+        : { execution: { resourceGroup: execution, oneShotEnforcement: "enforced" } }),
+      enabled: true,
+    });
+    const groups = { lane: { maximumConcurrency: 2, minimumStartIntervalMs: 0 } };
+
+    const missingExecution = await repositoryWithProfile("missing-execution", {
+      "contestants.yaml": contestantsConfig({
+        resourceGroups: groups,
+        contestants: [commandEntry("one"), commandEntry("two")],
+      }),
+      "judges.yaml": judgesConfig(),
+    });
+    await expect(resolveProfile(missingExecution, "missing-execution")).rejects.toThrow(
+      /execution\.resourceGroup/,
+    );
+
+    await expect(
+      repositoryWithProfile("undeclared-group", {
+        "contestants.yaml": contestantsConfig({
+          resourceGroups: groups,
+          contestants: [commandEntry("one", "lane"), commandEntry("two", "ghost-lane")],
+        }),
+        "judges.yaml": judgesConfig(),
+      }).then((root) => resolveProfile(root, "undeclared-group")),
+    ).rejects.toThrow(/ghost-lane/);
+
+    const parent = await repositoryWithProfile("complete", {
+      "contestants.yaml": contestantsConfig({
+        resourceGroups: groups,
+        contestants: [commandEntry("one", "lane"), commandEntry("two", "lane")],
+      }),
+      "judges.yaml": judgesConfig(),
+    });
+    const profile = await resolveProfile(parent, "complete");
+    expect(profile.contestants.contestants).toHaveLength(2);
+  });
+
+  it("exempts fixture and disabled entries from resource-group completeness", async () => {
+    const parent = await repositoryWithProfile("exempt", {
+      "contestants.yaml": contestantsConfig({
+        resourceGroups: { lane: { maximumConcurrency: 2, minimumStartIntervalMs: 0 } },
+        contestants: [
+          {
+            id: "command-disabled",
+            displayName: "Disabled Command",
+            harness: {
+              name: "example-harness",
+              version: "2.1.0",
+              adapter: "command",
+              command: {
+                argv: ["/absolute/path/to/harness", "{promptPath}", "{submissionPath}"],
+                environmentAllowlist: [],
+              },
+            },
+            model: { provider: "example", name: "example-model", version: "1.2.3" },
+            enabled: false,
+          },
+          {
+            id: "contestant-one",
+            displayName: "Contestant contestant-one",
+            harness: {
+              name: "fixture-harness",
+              version: "1.0.0",
+              adapter: "fixture",
+              fixture: "editorial",
+            },
+            model: {
+              provider: "local-fixture",
+              name: "contestant-one-model",
+              version: "1.0.0",
+            },
+            enabled: true,
+          },
+          {
+            id: "contestant-two",
+            displayName: "Contestant contestant-two",
+            harness: {
+              name: "fixture-harness",
+              version: "1.0.0",
+              adapter: "fixture",
+              fixture: "editorial",
+            },
+            model: {
+              provider: "local-fixture",
+              name: "contestant-two-model",
+              version: "1.0.0",
+            },
+            enabled: true,
+          },
+        ],
+      }),
+      "judges.yaml": judgesConfig(),
+    });
+    await expect(resolveProfile(parent, "exempt")).resolves.toBeDefined();
+  });
+
   it("rejects a resource group declared with conflicting definitions across files", () => {
     expect(() =>
       validateProfileCrossChecks({

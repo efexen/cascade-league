@@ -11,6 +11,7 @@ import { buildGallery } from "../gallery/index.js";
 import { runGeneration } from "../orchestration/generation.js";
 import { runWaveB } from "../orchestration/wave-b.js";
 import { startLoopbackStaticServer } from "../rendering/index.js";
+import { formatRunPlan, planGeneration } from "./planning.js";
 import {
   normalizeGenerationId,
   normalizeSeasonId,
@@ -83,6 +84,62 @@ program
   });
 
 program
+  .command("plan-generation")
+  .description(
+    "Preview and validate the next generation without writing anything or calling models",
+  )
+  .requiredOption(
+    "--season <season>",
+    "three-digit season alias or four-digit season ID",
+  )
+  .option("--profile <profile>", "configuration profile under config/profiles/")
+  .option("--generations-root <path>", "root directory for generations")
+  .option(
+    "--accept-prompt-only-one-shot",
+    "explicitly accept prompt-only one-shot enforcement for command contestants",
+  )
+  .action(
+    async (options: {
+      season: string;
+      profile?: string;
+      generationsRoot?: string;
+      acceptPromptOnlyOneShot?: boolean;
+    }) => {
+      const profileId = await requireProfile("plan-generation", options.profile);
+      const outcome = await planGeneration({
+        repositoryRoot: process.cwd(),
+        seasonId: normalizeSeasonId(options.season),
+        profileId,
+        ...(options.generationsRoot === undefined
+          ? {}
+          : { generationsRoot: resolve(options.generationsRoot) }),
+        acceptPromptOnlyOneShot: options.acceptPromptOnlyOneShot === true,
+      });
+      for (const entry of outcome.report.issues) {
+        console.error(`[${entry.severity}] ${entry.code}: ${entry.message}`);
+      }
+      if (!outcome.report.ok) {
+        console.error("plan-generation refused: preflight reported errors.");
+        process.exitCode = 1;
+        return;
+      }
+      if (outcome.promptOnlyRefusal.length > 0) {
+        console.error(
+          `plan-generation refused: ${String(outcome.promptOnlyRefusal.length)} enabled command contestant(s) rely on prompt-only one-shot enforcement: ${outcome.promptOnlyRefusal.join(", ")}`,
+        );
+        console.error(
+          "rerun with --accept-prompt-only-one-shot to acknowledge this explicitly.",
+        );
+        process.exitCode = 1;
+        return;
+      }
+      if (outcome.plan !== null) {
+        process.stdout.write(formatRunPlan(outcome.plan));
+      }
+    },
+  );
+
+program
   .command("create-generation")
   .description("Create one immutable generation snapshot")
   .requiredOption(
@@ -92,12 +149,17 @@ program
   .option("--profile <profile>", "configuration profile under config/profiles/")
   .option("--generation <generation>", "explicit four-digit generation ID")
   .option("--generations-root <path>", "root directory for generations")
+  .option(
+    "--accept-prompt-only-one-shot",
+    "explicitly accept prompt-only one-shot enforcement for command contestants",
+  )
   .action(
     async (options: {
       season: string;
       profile?: string;
       generation?: string;
       generationsRoot?: string;
+      acceptPromptOnlyOneShot?: boolean;
     }) => {
       const profileId = await requireProfile("create-generation", options.profile);
       const result = await createGeneration({
@@ -110,6 +172,7 @@ program
         ...(options.generationsRoot === undefined
           ? {}
           : { generationsRoot: resolve(options.generationsRoot) }),
+        acceptPromptOnlyOneShot: options.acceptPromptOnlyOneShot === true,
       });
       console.log(
         `[${result.generationId}] generation created: ${result.generationPath}`,
@@ -125,11 +188,16 @@ program
   .option("--generation <generation>", "existing four-digit generation ID")
   .option("--generation-path <path>", "existing generation directory")
   .option("--generations-root <path>", "root directory for an existing generation")
+  .option(
+    "--allow-model-calls",
+    "explicitly permit this run to make external model calls through command adapters",
+  )
   .action(
     async (
       options: GenerationLocationOptions & {
         readonly season?: string;
         readonly profile?: string;
+        readonly allowModelCalls?: boolean;
       },
     ) => {
       const seasonId =
@@ -150,6 +218,7 @@ program
         ...(options.generationsRoot === undefined
           ? {}
           : { generationsRoot: resolve(options.generationsRoot) }),
+        allowModelCalls: options.allowModelCalls === true,
         onProgress: progress(),
       });
       console.log(`[${result.generationId}] generation: ${result.generationPath}`);
@@ -163,17 +232,26 @@ program
   .option("--generation <generation>", "existing four-digit generation ID")
   .option("--generation-path <path>", "existing generation directory")
   .option("--generations-root <path>", "root directory for an existing generation")
-  .action(async (options: GenerationLocationOptions) => {
-    const generationPath = existingGenerationPath(options);
-    const result = await runGeneration({
-      repositoryRoot: process.cwd(),
-      generationPath,
-      resumable: true,
-      onProgress: progress(),
-    });
-    console.log(`[${result.generationId}] generation: ${result.generationPath}`);
-    console.log(`[${result.generationId}] gallery: ${result.gallery.publicPath}`);
-  });
+  .option(
+    "--allow-model-calls",
+    "explicitly permit this run to make external model calls through command adapters",
+  )
+  .action(
+    async (
+      options: GenerationLocationOptions & { readonly allowModelCalls?: boolean },
+    ) => {
+      const generationPath = existingGenerationPath(options);
+      const result = await runGeneration({
+        repositoryRoot: process.cwd(),
+        generationPath,
+        resumable: true,
+        allowModelCalls: options.allowModelCalls === true,
+        onProgress: progress(),
+      });
+      console.log(`[${result.generationId}] generation: ${result.generationPath}`);
+      console.log(`[${result.generationId}] gallery: ${result.gallery.publicPath}`);
+    },
+  );
 
 program
   .command("build-gallery")
@@ -252,6 +330,14 @@ program
   .option("--generation <generation>", "accept an existing four-digit generation ID")
   .option("--generation-path <path>", "accept an existing generation directory")
   .option("--generations-root <path>", "root directory for newly created generations")
+  .option(
+    "--allow-model-calls",
+    "explicitly permit this run to make external model calls through command adapters",
+  )
+  .option(
+    "--accept-prompt-only-one-shot",
+    "explicitly accept prompt-only one-shot enforcement when creating a generation",
+  )
   .action(
     async (options: {
       season?: string;
@@ -259,6 +345,8 @@ program
       generation?: string;
       generationPath?: string;
       generationsRoot?: string;
+      allowModelCalls?: boolean;
+      acceptPromptOnlyOneShot?: boolean;
     }) => {
       const seasonId =
         options.season === undefined ? undefined : normalizeSeasonId(options.season);
@@ -301,6 +389,8 @@ program
           ? {}
           : { generationsRoot: resolve(options.generationsRoot) }),
         ...(generationId === undefined ? {} : { generationId }),
+        allowModelCalls: options.allowModelCalls === true,
+        acceptPromptOnlyOneShot: options.acceptPromptOnlyOneShot === true,
         onProgress: (message) => console.log(message),
       });
       console.log(`[${result.generationId}] Wave-B complete: ${result.generationPath}`);

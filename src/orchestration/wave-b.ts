@@ -14,7 +14,8 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { z } from "zod";
 
-import { createGeneration } from "../artifacts/generation.js";
+import { allocateGenerationId, createGeneration } from "../artifacts/generation.js";
+import { resolveProfile } from "../config/profiles.js";
 import {
   buildContestantGenerationOnePrompt,
   buildJudgeAwardsPrompt,
@@ -35,6 +36,7 @@ import {
   ManifestSchema,
   ProfileJsonSchema,
   RunSchema,
+  RunPlanSchema,
   SnapshotSchema,
   TaskStateSchema,
   TaskStateStatusSchema,
@@ -114,6 +116,13 @@ export interface WaveBRunOptions {
   ) => Promise<AnonymousContactSheetResult>;
   /** Enable persisted task-state replay for resume-generation. */
   readonly resumable?: boolean;
+  /**
+   * Explicit operator grant that this run may make external model calls
+   * through command adapters. It is never persisted; every run that still has
+   * callable command tasks must receive it again.
+   */
+  readonly allowModelCalls?: boolean;
+  readonly acceptPromptOnlyOneShot?: boolean;
   readonly afterTask?: (task: WaveBTask) => void | Promise<void>;
   readonly onProgress?: (message: string) => void;
 }
@@ -176,6 +185,41 @@ export interface WaveBRunResult {
   readonly judges: readonly WaveBJudgeResult[];
 }
 
+interface AnonymousCandidateIdentity {
+  readonly anonymousCandidateId: string;
+}
+
+function anonymousCandidateIds(
+  candidates: readonly AnonymousCandidateIdentity[],
+): string[] {
+  return candidates.map((candidate) => candidate.anonymousCandidateId);
+}
+
+function isRenderableCandidate(
+  candidate: Pick<WaveBContestantResult, "run" | "validation" | "screenshotPath">,
+): boolean {
+  return (
+    candidate.run.status === "succeeded" &&
+    candidate.validation.status === "valid" &&
+    candidate.screenshotPath !== null
+  );
+}
+
+function renderableCandidates(
+  candidates: readonly WaveBContestantResult[],
+): WaveBContestantResult[] {
+  return candidates.filter(isRenderableCandidate);
+}
+
+function successfulJudgmentResults(
+  candidates: readonly WaveBJudgeCandidateResult[],
+): WaveBJudgeCandidateResult[] {
+  return candidates.filter(
+    (candidate) =>
+      candidate.result.status === "succeeded" && candidate.result.judgment !== null,
+  );
+}
+
 function timestamp(value: string | Date | undefined): string {
   const candidate =
     value instanceof Date ? value.toISOString() : (value ?? new Date().toISOString());
@@ -189,6 +233,7 @@ interface CanonicalGenerationState {
   readonly snapshotHash: string;
   readonly configHashes: Manifest["configHashes"];
   readonly profile: ProfileJson;
+  readonly legacyPhase1: boolean;
 }
 
 const MAX_INTEGRITY_FILE_BYTES = 64 * 1024 * 1024;
@@ -314,10 +359,30 @@ async function loadCanonicalGenerationState(
 ): Promise<CanonicalGenerationState> {
   const snapshotPath = join(generationPath, "challenge/snapshot.json");
   const snapshot = await readJsonWithSchema(snapshotPath, SnapshotSchema);
-  const profile = await readJsonWithSchema(
-    join(generationPath, "config/profile.json"),
-    ProfileJsonSchema,
-  );
+  let profile: ProfileJson;
+  let legacyPhase1 = false;
+  try {
+    profile = await readJsonWithSchema(
+      join(generationPath, "config/profile.json"),
+      ProfileJsonSchema,
+    );
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+      throw error;
+    }
+    // Phase 1 generations predate named profiles. Their source config paths
+    // were the repository-root config files, and their immutable generation
+    // copies remain the canonical bytes after those sources moved in Phase 2.
+    legacyPhase1 = true;
+    profile = ProfileJsonSchema.parse({
+      schemaVersion: 1,
+      profileId: "legacy.phase1",
+      sourcePaths: {
+        contestants: "config/contestants.yaml",
+        judges: "config/judges.yaml",
+      },
+    });
+  }
   return {
     generationPath,
     repositoryRoot,
@@ -325,6 +390,7 @@ async function loadCanonicalGenerationState(
     snapshotHash: await sha256File(snapshotPath),
     configHashes,
     profile,
+    legacyPhase1,
   };
 }
 
@@ -399,12 +465,19 @@ async function verifyCanonicalGenerationState(
   for (const [provenancePath, expectedHash] of Object.entries(
     state.snapshot.inputHashes,
   )) {
-    // `config/profile.json` is the one generation-relative provenance key:
-    // it is a durable artifact of this generation, not a repository source.
-    const sourcePath =
-      provenancePath === "config/profile.json"
-        ? join(state.generationPath, provenancePath)
-        : resolve(state.repositoryRoot, provenancePath);
+    // `config/profile.json` and `run-plan.json` are generation-relative
+    // provenance keys: durable artifacts of this generation, not repository
+    // sources. Phase 1 generations predate `run-plan.json` and simply have no
+    // such key, so they continue to verify.
+    const generationRelative =
+      provenancePath === "config/profile.json" ||
+      provenancePath === "run-plan.json" ||
+      (state.legacyPhase1 &&
+        (provenancePath === "config/contestants.yaml" ||
+          provenancePath === "config/judges.yaml"));
+    const sourcePath = generationRelative
+      ? join(state.generationPath, provenancePath)
+      : resolve(state.repositoryRoot, provenancePath);
     try {
       await verifyRegularFileHash(
         sourcePath,
@@ -922,6 +995,279 @@ async function notifyTask(
   } catch (error) {
     throw new WaveBInterruptionError(error);
   }
+}
+
+interface PendingCommandCalls {
+  readonly contestantCalls: number;
+  readonly candidateJudgingCalls: number;
+  readonly awardsCalls: number;
+}
+
+async function readReusableCandidateJudgment(
+  path: string,
+  generationId: string,
+  judgeId: string,
+  anonymousCandidateId: string,
+): Promise<z.infer<typeof CandidateJudgmentSchema> | null> {
+  if (!(await regularFileExists(path))) return null;
+  try {
+    const judgment = await readJsonWithSchema(path, CandidateJudgmentSchema);
+    if (
+      judgment.generationId !== generationId ||
+      judgment.judgeId !== judgeId ||
+      judgment.anonymousCandidateId !== anonymousCandidateId
+    ) {
+      return null;
+    }
+    return judgment;
+  } catch {
+    return null;
+  }
+}
+
+async function readReusableAwards(
+  generationPath: string,
+  generationId: string,
+  judgeId: string,
+  eligibleCandidates: readonly AnonymousCandidateIdentity[],
+): Promise<z.infer<typeof GenerationAwardsSchema> | null> {
+  const path = join(generationPath, "judging", judgeId, "awards.json");
+  if (!(await regularFileExists(path))) return null;
+  try {
+    const awards = await readJsonWithSchema(
+      path,
+      createGenerationAwardsSchema(anonymousCandidateIds(eligibleCandidates)),
+    );
+    if (awards.generationId !== generationId || awards.judgeId !== judgeId) return null;
+    return awards;
+  } catch {
+    return null;
+  }
+}
+
+async function candidateMayBeRenderableOnResume(
+  generationPath: string,
+  contestant: ContestantConfig,
+): Promise<boolean> {
+  let run: Run;
+  try {
+    run = await readJsonWithSchema(
+      join(generationPath, "contestants", contestant.id, "run.json"),
+      RunSchema,
+    );
+  } catch {
+    // Preserve the guard's conservative boundary when durable evidence is
+    // missing or malformed.
+    return true;
+  }
+  if (run.status === "running") return false;
+  if (run.status === "pending") {
+    const state = await readTaskState(
+      taskPath(generationPath, "contestant", contestant.id),
+    );
+    return state === null || state.status === "pending";
+  }
+  if (run.status !== "succeeded") return false;
+
+  let validation: Validation;
+  try {
+    validation = await readJsonWithSchema(
+      join(generationPath, "contestants", contestant.id, "validation.json"),
+      ValidationSchema,
+    );
+  } catch {
+    // A succeeded execution with no usable validation is resumed from the
+    // validation/render boundary and can still become renderable.
+    return true;
+  }
+  if (validation.status !== "valid") return false;
+  if (
+    !(await regularFileExists(
+      join(generationPath, "contestants", contestant.id, "screenshot.png"),
+    ))
+  ) {
+    return true;
+  }
+  return isRenderableCandidate({
+    run,
+    validation,
+    screenshotPath: join(
+      generationPath,
+      "contestants",
+      contestant.id,
+      "screenshot.png",
+    ),
+  });
+}
+
+function modelCallRefusalMessage(
+  generationId: string,
+  pending: PendingCommandCalls,
+): string | null {
+  const pendingTotal =
+    pending.contestantCalls + pending.candidateJudgingCalls + pending.awardsCalls;
+  if (pendingTotal === 0) return null;
+  const parts: string[] = [];
+  if (pending.contestantCalls > 0) {
+    parts.push(`${String(pending.contestantCalls)} contestant call(s)`);
+  }
+  if (pending.candidateJudgingCalls > 0) {
+    parts.push(
+      `up to ${String(pending.candidateJudgingCalls)} candidate-judging call(s)`,
+    );
+  }
+  if (pending.awardsCalls > 0) {
+    parts.push(`up to ${String(pending.awardsCalls)} awards call(s)`);
+  }
+  return `generation ${generationId} may make external model calls: ${parts.join(", ")} pending; rerun with --allow-model-calls`;
+}
+
+async function refuseUnconsentedProfileBeforeCreation(
+  options: WaveBRunOptions,
+): Promise<void> {
+  if (options.generationPath !== undefined || options.allowModelCalls === true) return;
+  if (options.seasonId === undefined || options.profileId === undefined) return;
+
+  const profile = await resolveProfile(
+    resolve(options.repositoryRoot),
+    options.profileId,
+  );
+  const contestants = profile.contestants.contestants.filter((entry) => entry.enabled);
+  const judges = profile.judges.judges.filter((entry) => entry.enabled);
+  const commandContestants = contestants.filter(
+    (entry) => entry.harness.adapter === "command",
+  );
+  const commandJudges = judges.filter((entry) => entry.harness.adapter === "command");
+  const generationId =
+    options.generationId ??
+    (await allocateGenerationId(
+      resolve(options.generationsRoot ?? join(options.repositoryRoot, "generations")),
+    ));
+  const refusal = modelCallRefusalMessage(generationId, {
+    contestantCalls: commandContestants.length,
+    candidateJudgingCalls: contestants.length * commandJudges.length,
+    awardsCalls: commandJudges.length,
+  });
+  if (refusal !== null) throw new Error(refusal);
+}
+
+/**
+ * Counts the external model calls this run may still make through command
+ * adapters. A resumable run only re-dispatches tasks that are missing or
+ * still `pending` (running and terminal tasks are never retried); a
+ * non-resumable run re-dispatches everything, so every command task counts.
+ * Candidate-judging and awards calls are maximums because they only execute
+ * after earlier stages succeed.
+ */
+async function countPendingCommandCalls(
+  generationPath: string,
+  generationId: string,
+  commandContestants: readonly ContestantConfig[],
+  commandJudges: readonly JudgeConfig[],
+  rosterContestants: readonly ContestantConfig[],
+  anonymousByContestant: ReadonlyMap<string, string>,
+  resumable: boolean,
+): Promise<PendingCommandCalls> {
+  const callable = async (
+    path: string,
+    canDispatchWhenPending?: () => Promise<boolean>,
+  ): Promise<boolean> => {
+    if (!resumable) return true;
+    const state = await readTaskState(path);
+    if (state === null) {
+      return canDispatchWhenPending === undefined ? true : canDispatchWhenPending();
+    }
+    if (state.status !== "pending") return false;
+    return canDispatchWhenPending === undefined ? true : canDispatchWhenPending();
+  };
+  let contestantCalls = 0;
+  for (const contestant of commandContestants) {
+    if (
+      await callable(
+        taskPath(generationPath, "contestant", contestant.id),
+        async () => {
+          const runPath = join(
+            generationPath,
+            "contestants",
+            contestant.id,
+            "run.json",
+          );
+          if (!(await regularFileExists(runPath))) return true;
+          try {
+            const run = await readJsonWithSchema(runPath, RunSchema);
+            return run.status === "pending";
+          } catch {
+            return true;
+          }
+        },
+      )
+    ) {
+      contestantCalls += 1;
+    }
+  }
+  let candidateJudgingCalls = 0;
+  let awardsCalls = 0;
+  const possiblyRenderableCandidates: AnonymousCandidateIdentity[] = [];
+  for (const contestant of rosterContestants) {
+    const anonymousCandidateId = anonymousByContestant.get(contestant.id);
+    if (anonymousCandidateId === undefined) {
+      throw new Error(`anonymous map is missing ${contestant.id}`);
+    }
+    if (!resumable) {
+      possiblyRenderableCandidates.push({ anonymousCandidateId });
+      continue;
+    }
+    if (await candidateMayBeRenderableOnResume(generationPath, contestant)) {
+      possiblyRenderableCandidates.push({ anonymousCandidateId });
+    }
+  }
+  for (const judge of commandJudges) {
+    let candidateAssessmentsCanAllSucceed = possiblyRenderableCandidates.length > 0;
+    const successfulOrDispatchable: AnonymousCandidateIdentity[] = [];
+    for (const candidate of possiblyRenderableCandidates) {
+      const anonymousCandidateId = candidate.anonymousCandidateId;
+      const judgment = await readReusableCandidateJudgment(
+        join(generationPath, "judging", judge.id, `${anonymousCandidateId}.json`),
+        generationId,
+        judge.id,
+        anonymousCandidateId,
+      );
+      if (judgment !== null) {
+        successfulOrDispatchable.push(candidate);
+        continue;
+      }
+      if (!resumable) {
+        candidateJudgingCalls += 1;
+        successfulOrDispatchable.push(candidate);
+        continue;
+      }
+      const state = await readTaskState(
+        taskPath(generationPath, "judge", `${judge.id}\0${anonymousCandidateId}`),
+      );
+      if (state === null || state.status === "pending") {
+        candidateJudgingCalls += 1;
+        successfulOrDispatchable.push(candidate);
+      } else {
+        candidateAssessmentsCanAllSucceed = false;
+      }
+    }
+    const reusableAwards = candidateAssessmentsCanAllSucceed
+      ? await readReusableAwards(
+          generationPath,
+          generationId,
+          judge.id,
+          successfulOrDispatchable,
+        )
+      : null;
+    if (
+      candidateAssessmentsCanAllSucceed &&
+      reusableAwards === null &&
+      (await callable(taskPath(generationPath, "awards", judge.id)))
+    ) {
+      awardsCalls += 1;
+    }
+  }
+  return { contestantCalls, candidateJudgingCalls, awardsCalls };
 }
 
 async function ensureContestantPrompt(
@@ -2099,12 +2445,7 @@ async function runOneJudge(input: {
     };
   }
 
-  const renderable = input.contestants.filter(
-    (contestant) =>
-      contestant.validation.status === "valid" &&
-      contestant.screenshotPath !== null &&
-      contestant.run.status === "succeeded",
-  );
+  const renderable = renderableCandidates(input.contestants);
   if (input.resumable === true) {
     const renderableIds = new Set(
       renderable.map((contestant) => contestant.anonymousCandidateId),
@@ -2265,16 +2606,12 @@ async function runOneJudge(input: {
       if (input.resumable === true && candidateTask !== null) {
         const durablePath = join(judgePath, `${anonymousCandidateId}.json`);
         let durableJudgment: z.infer<typeof CandidateJudgmentSchema> | null = null;
-        if (await regularFileExists(durablePath)) {
-          try {
-            durableJudgment = await readJsonWithSchema(
-              durablePath,
-              CandidateJudgmentSchema,
-            );
-          } catch {
-            durableJudgment = null;
-          }
-        }
+        durableJudgment = await readReusableCandidateJudgment(
+          durablePath,
+          input.generationId,
+          input.judge.id,
+          anonymousCandidateId,
+        );
         if (durableJudgment !== null) {
           if (candidateTask.status !== "succeeded") {
             await finishTask(
@@ -2513,10 +2850,7 @@ async function runOneJudge(input: {
     },
   ).finally(() => removeWorkspace(join(judgePath, "workspaces")));
 
-  const validJudgmentResults = candidateResults.filter(
-    (candidate) =>
-      candidate.result.status === "succeeded" && candidate.result.judgment !== null,
-  );
+  const validJudgmentResults = successfulJudgmentResults(candidateResults);
   const allCandidateAssessmentsValid =
     renderable.length > 0 &&
     candidateResults.length === renderable.length &&
@@ -2575,19 +2909,12 @@ async function runOneJudge(input: {
     const awardsRawPath = join(judgePath, "raw", "awards.json");
     if (input.resumable === true && awardsTask !== null) {
       let storedAwards: z.infer<typeof GenerationAwardsSchema> | null = null;
-      const storedAwardsPath = join(judgePath, "awards.json");
-      if (await regularFileExists(storedAwardsPath)) {
-        try {
-          storedAwards = await readJsonWithSchema(
-            storedAwardsPath,
-            createGenerationAwardsSchema(
-              validJudgmentResults.map((candidate) => candidate.anonymousCandidateId),
-            ),
-          );
-        } catch {
-          storedAwards = null;
-        }
-      }
+      storedAwards = await readReusableAwards(
+        input.generationPath,
+        input.generationId,
+        input.judge.id,
+        validJudgmentResults,
+      );
       if (storedAwards !== null) {
         if (awardsTask.status !== "succeeded") {
           await finishTask(
@@ -2718,7 +3045,7 @@ async function runOneJudge(input: {
         }
         if (awards.status === "succeeded" && awards.awards !== null) {
           const parsedAwards = createGenerationAwardsSchema(
-            validJudgmentResults.map((candidate) => candidate.anonymousCandidateId),
+            anonymousCandidateIds(validJudgmentResults),
           ).parse(awards.awards);
           await writeJsonArtifact(
             join(judgePath, "awards.json"),
@@ -2854,11 +3181,19 @@ async function loadGenerationPath(options: WaveBRunOptions): Promise<string> {
       : { generationId: options.generationId }),
     ...(options.now === undefined ? {} : { now: options.now }),
     ...(options.randomBytes === undefined ? {} : { randomBytes: options.randomBytes }),
+    ...(options.acceptPromptOnlyOneShot === true
+      ? { acceptPromptOnlyOneShot: true }
+      : {}),
   });
   return created.generationPath;
 }
 
 export async function runWaveB(options: WaveBRunOptions): Promise<WaveBRunResult> {
+  // Combined create-and-run commands must fail before even creating the
+  // immutable generation when consent is absent. The post-creation guard below
+  // remains authoritative for existing generations and closes any profile
+  // change race between this read-only check and generation creation.
+  await refuseUnconsentedProfileBeforeCreation(options);
   const generationPath = await loadGenerationPath(options);
   const manifest = await readJsonWithSchema(
     join(generationPath, "manifest.json"),
@@ -2919,6 +3254,47 @@ export async function runWaveB(options: WaveBRunOptions): Promise<WaveBRunResult
   const clock = options.clock ?? (() => new Date());
   const operationTimestamp = timestamp(options.now ?? clock());
   const progress = options.onProgress ?? (() => undefined);
+
+  // The paid-call guard. It is config-driven: only enabled command entries in
+  // the generation's own copied configuration can make external model calls
+  // (injected test adapters do not count). It runs after the canonical state
+  // and rosters are loaded and before the first manifest transition or
+  // task-state write, so a refusal mutates nothing.
+  const commandContestants = contestants.filter(
+    (contestant) => contestant.harness.adapter === "command",
+  );
+  const commandJudges = judges.filter((judge) => judge.harness.adapter === "command");
+  const runPlanPath = join(generationPath, "run-plan.json");
+  if (
+    (await regularFileExists(runPlanPath)) &&
+    commandContestants.some(
+      (contestant) => contestant.execution?.oneShotEnforcement === "prompt_only",
+    )
+  ) {
+    const runPlan = await readJsonWithSchema(runPlanPath, RunPlanSchema);
+    if (!runPlan.promptOnlyOneShotAccepted) {
+      throw new Error(
+        `generation ${manifest.generationId} refuses command contestants with prompt-only one-shot enforcement: ${runPlan.promptOnlyOneShot.join(", ")}; recreate with --accept-prompt-only-one-shot`,
+      );
+    }
+  }
+  if (
+    (commandContestants.length > 0 || commandJudges.length > 0) &&
+    options.allowModelCalls !== true
+  ) {
+    const pending = await countPendingCommandCalls(
+      generationPath,
+      manifest.generationId,
+      commandContestants,
+      commandJudges,
+      contestants,
+      anonymousByContestant,
+      options.resumable === true,
+    );
+    const refusal = modelCallRefusalMessage(manifest.generationId, pending);
+    if (refusal !== null) throw new Error(refusal);
+  }
+
   await updateManifest(generationPath, {
     status: "contestants_running",
     startedAt: manifest.startedAt ?? operationTimestamp,

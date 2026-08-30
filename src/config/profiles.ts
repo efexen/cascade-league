@@ -140,7 +140,68 @@ export async function resolveProfile(
     judges,
   };
   validateProfileCrossChecks(profile);
+  validateResourceGroupCompleteness(profile);
   return profile;
+}
+
+/**
+ * Every enabled command entry in a profile must name an execution resource
+ * group that is declared in the same file. Fixture-adapter entries are exempt
+ * because they consume no external resource lane, and disabled entries are
+ * exempt because they never run. This is a profile-resolution rule, not a
+ * run-configuration schema rule: archived generation configs copied into a
+ * generation are read through `readYamlWithSchema` directly and must remain
+ * unaffected.
+ */
+export function validateResourceGroupCompleteness(input: {
+  readonly contestants: {
+    readonly resourceGroups?: Record<string, ResourceGroupDeclaration> | undefined;
+    readonly contestants: readonly {
+      readonly id: string;
+      readonly enabled: boolean;
+      readonly harness: { readonly adapter: string };
+      readonly execution?: { readonly resourceGroup: string } | undefined;
+    }[];
+  };
+  readonly judges: {
+    readonly resourceGroups?: Record<string, ResourceGroupDeclaration> | undefined;
+    readonly judges: readonly {
+      readonly id: string;
+      readonly enabled: boolean;
+      readonly harness: { readonly adapter: string };
+      readonly execution?: { readonly resourceGroup: string } | undefined;
+    }[];
+  };
+}): void {
+  const sides = [
+    {
+      label: "contestants",
+      config: input.contestants,
+      entries: input.contestants.contestants,
+    },
+    {
+      label: "judges",
+      config: input.judges,
+      entries: input.judges.judges,
+    },
+  ] as const;
+  for (const { label, config, entries } of sides) {
+    const declared = new Set(Object.keys(config.resourceGroups ?? {}));
+    for (const entry of entries) {
+      if (!entry.enabled || entry.harness.adapter !== "command") continue;
+      const group = entry.execution?.resourceGroup;
+      if (group === undefined) {
+        throw new Error(
+          `enabled command ${label.slice(0, -1)} "${entry.id}" must declare execution.resourceGroup naming a resource group declared in the ${label} profile file`,
+        );
+      }
+      if (!declared.has(group)) {
+        throw new Error(
+          `enabled command ${label.slice(0, -1)} "${entry.id}" references resource group "${group}" which is not declared in the ${label} profile file`,
+        );
+      }
+    }
+  }
 }
 
 /**
