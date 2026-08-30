@@ -88,6 +88,7 @@ import {
   writeTextAtomically,
   NOT_RECORDED_VERSION,
 } from "../contestants/support.js";
+import { ResourceAwareScheduler, type SchedulerTime } from "./resource-scheduler.js";
 
 export interface WaveBRunOptions {
   readonly repositoryRoot: string;
@@ -98,6 +99,8 @@ export interface WaveBRunOptions {
   readonly generationId?: string;
   readonly now?: string | Date;
   readonly clock?: () => Date;
+  /** Monotonic scheduler clock injection for deterministic orchestration tests. */
+  readonly schedulerTime?: SchedulerTime;
   readonly randomBytes?: (size: number) => Buffer;
   readonly contestantAdapters?: ReadonlyMap<string, ContestantAdapter>;
   readonly judgeAdapters?: ReadonlyMap<string, JudgeAdapter>;
@@ -720,39 +723,6 @@ function differsFrom(order: readonly string[], other: readonly string[]): boolea
   );
 }
 
-async function mapConcurrent<T, R>(
-  values: readonly T[],
-  requestedConcurrency: number,
-  mapper: (value: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  if (values.length === 0) return [];
-  const concurrency = Math.max(
-    1,
-    Math.min(values.length, Math.floor(requestedConcurrency)),
-  );
-  const results: R[] = new Array(values.length);
-  const errors: { readonly index: number; readonly error: unknown }[] = [];
-  let nextIndex = 0;
-  const worker = async (): Promise<void> => {
-    while (true) {
-      const index = nextIndex;
-      nextIndex += 1;
-      if (index >= values.length) return;
-      try {
-        results[index] = await mapper(values[index]!, index);
-      } catch (error) {
-        errors.push({ index, error });
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: concurrency }, () => worker()));
-  if (errors.length > 0) {
-    errors.sort((left, right) => left.index - right.index);
-    throw errors[0]!.error;
-  }
-  return results;
-}
-
 function independentOrder(
   seed: string,
   ids: readonly string[],
@@ -1336,6 +1306,10 @@ async function runOneContestant(
   const contestantPath = join(input.generationPath, "contestants", input.contestant.id);
   const workspacePath = join(contestantPath, "workspace");
   const runPath = join(contestantPath, "run.json");
+  // Capture admission time before the first filesystem await. The scheduler
+  // invokes this mapper synchronously, so a concurrent paced admission cannot
+  // advance the injected clock before an accepted execution records its start.
+  const admittedAt = input.clock();
   const existingRun = await readJsonWithSchema(runPath, RunSchema);
   if (existingRun.status !== "pending") {
     await removeWorkspace(workspacePath);
@@ -1357,7 +1331,7 @@ async function runOneContestant(
   }
 
   const budget = configuredContestantBudget(input.contestant, input.contestantsConfig);
-  const started = input.clock();
+  const started = admittedAt;
   const startedAt = timestamp(started);
   const running = RunSchema.parse({
     ...existingRun,
@@ -2372,6 +2346,7 @@ async function runOneJudge(input: {
   readonly clock: () => Date;
   readonly randomBytes: (size: number) => Buffer;
   readonly adapter: JudgeAdapter;
+  readonly scheduler: ResourceAwareScheduler;
   readonly contactSheetBuilder: (
     input: Parameters<typeof buildAnonymousContactSheet>[0],
   ) => Promise<AnonymousContactSheetResult>;
@@ -2550,305 +2525,323 @@ async function runOneJudge(input: {
     renderable.map((contestant) => [contestant.anonymousCandidateId, contestant]),
   );
   const budget = configuredJudgeBudget(input.judge, input.judgeDefaults);
-  const candidateResults = await mapConcurrent(
-    assessmentOrder,
-    Math.min(2, input.judgeDefaults.concurrencyPerJudge),
-    async (anonymousCandidateId): Promise<WaveBJudgeCandidateResult> => {
-      const taskStarted = input.clock();
-      const taskStartedAt = timestamp(taskStarted);
-      const taskTargetId = `${input.judge.id}\0${anonymousCandidateId}`;
-      const candidateTask =
-        input.resumable === true
-          ? await ensurePendingTaskState(
-              input.generationPath,
-              input.generationId,
-              "judge",
-              taskTargetId,
-            )
-          : null;
-      const contestant = contestantsByAnonymousId.get(anonymousCandidateId);
-      if (contestant === undefined || contestant.screenshotPath === null) {
-        const taskCompleted = input.clock();
-        if (input.resumable === true && candidateTask !== null) {
-          const taskResult =
-            candidateTask.status === "running"
-              ? await markTaskUncertain(
-                  input.generationPath,
-                  input.generationId,
-                  "judge",
-                  taskTargetId,
-                  input.clock,
-                  "candidate is not renderable after an interrupted judge task",
-                )
-              : candidateTask;
-          if (taskResult.status === "pending") {
-            await finishTask(
-              input.generationPath,
-              input.generationId,
-              "judge",
-              taskTargetId,
-              "invalid",
-              input.clock,
-              "candidate is not renderable",
-              null,
-            );
+  const assessmentItems = await Promise.all(
+    assessmentOrder.map(async (anonymousCandidateId) => {
+      const needsAdapterCall = await judgeCandidateNeedsAdapterCall({
+        generationPath: input.generationPath,
+        generationId: input.generationId,
+        judge: input.judge,
+        judgePath,
+        anonymousCandidateId,
+        contestant: contestantsByAnonymousId.get(anonymousCandidateId),
+        resumable: input.resumable === true,
+      });
+      const resourceGroup = input.judge.execution?.resourceGroup;
+      return needsAdapterCall && resourceGroup !== undefined
+        ? { value: anonymousCandidateId, resourceGroup }
+        : { value: anonymousCandidateId };
+    }),
+  );
+  const candidateResults = await input.scheduler
+    .map<string, WaveBJudgeCandidateResult>(
+      assessmentItems,
+      async (anonymousCandidateId): Promise<WaveBJudgeCandidateResult> => {
+        const taskStarted = input.clock();
+        const taskStartedAt = timestamp(taskStarted);
+        const taskTargetId = `${input.judge.id}\0${anonymousCandidateId}`;
+        const candidateTask =
+          input.resumable === true
+            ? await ensurePendingTaskState(
+                input.generationPath,
+                input.generationId,
+                "judge",
+                taskTargetId,
+              )
+            : null;
+        const contestant = contestantsByAnonymousId.get(anonymousCandidateId);
+        if (contestant === undefined || contestant.screenshotPath === null) {
+          const taskCompleted = input.clock();
+          if (input.resumable === true && candidateTask !== null) {
+            const taskResult =
+              candidateTask.status === "running"
+                ? await markTaskUncertain(
+                    input.generationPath,
+                    input.generationId,
+                    "judge",
+                    taskTargetId,
+                    input.clock,
+                    "candidate is not renderable after an interrupted judge task",
+                  )
+                : candidateTask;
+            if (taskResult.status === "pending") {
+              await finishTask(
+                input.generationPath,
+                input.generationId,
+                "judge",
+                taskTargetId,
+                "invalid",
+                input.clock,
+                "candidate is not renderable",
+                null,
+              );
+            }
           }
-        }
-        return {
-          anonymousCandidateId,
-          result: makeJudgeCandidateFailure("candidate is not renderable"),
-          durablePath: null,
-          startedAt: taskStartedAt,
-          completedAt: timestamp(taskCompleted),
-          durationMs: Math.max(0, taskCompleted.getTime() - taskStarted.getTime()),
-        };
-      }
-      if (input.resumable === true && candidateTask !== null) {
-        const durablePath = join(judgePath, `${anonymousCandidateId}.json`);
-        let durableJudgment: z.infer<typeof CandidateJudgmentSchema> | null = null;
-        durableJudgment = await readReusableCandidateJudgment(
-          durablePath,
-          input.generationId,
-          input.judge.id,
-          anonymousCandidateId,
-        );
-        if (durableJudgment !== null) {
-          if (candidateTask.status !== "succeeded") {
-            await finishTask(
-              input.generationPath,
-              input.generationId,
-              "judge",
-              taskTargetId,
-              "succeeded",
-              input.clock,
-              null,
-              true,
-            );
-          }
-          const completedAt = candidateTask.completedAt ?? timestamp(input.clock());
           return {
             anonymousCandidateId,
-            result: {
-              status: "succeeded",
-              response: null,
-              judgment: durableJudgment,
-              usage: durableJudgment.modelUsage,
-              rawOutput: null,
-              error: null,
-              timedOut: false,
-              attemptCount: 1,
-            },
-            durablePath,
-            startedAt: candidateTask.startedAt ?? taskStartedAt,
-            completedAt,
-            durationMs: Math.max(
-              0,
-              Date.parse(completedAt) -
-                Date.parse(candidateTask.startedAt ?? taskStartedAt),
-            ),
-          };
-        }
-        if (TERMINAL_TASK_STATUSES.has(candidateTask.status)) {
-          const failedResult = judgeResultFromTask(candidateTask);
-          const completedAt = candidateTask.completedAt ?? timestamp(input.clock());
-          return {
-            anonymousCandidateId,
-            result: failedResult,
+            result: makeJudgeCandidateFailure("candidate is not renderable"),
             durablePath: null,
-            startedAt: candidateTask.startedAt ?? taskStartedAt,
-            completedAt,
-            durationMs: Math.max(
-              0,
-              Date.parse(completedAt) -
-                Date.parse(candidateTask.startedAt ?? taskStartedAt),
-            ),
+            startedAt: taskStartedAt,
+            completedAt: timestamp(taskCompleted),
+            durationMs: Math.max(0, taskCompleted.getTime() - taskStarted.getTime()),
           };
         }
-        if (candidateTask.status === "running") {
-          const uncertain = await markTaskUncertain(
+        if (input.resumable === true && candidateTask !== null) {
+          const durablePath = join(judgePath, `${anonymousCandidateId}.json`);
+          let durableJudgment: z.infer<typeof CandidateJudgmentSchema> | null = null;
+          durableJudgment = await readReusableCandidateJudgment(
+            durablePath,
+            input.generationId,
+            input.judge.id,
+            anonymousCandidateId,
+          );
+          if (durableJudgment !== null) {
+            if (candidateTask.status !== "succeeded") {
+              await finishTask(
+                input.generationPath,
+                input.generationId,
+                "judge",
+                taskTargetId,
+                "succeeded",
+                input.clock,
+                null,
+                true,
+              );
+            }
+            const completedAt = candidateTask.completedAt ?? timestamp(input.clock());
+            return {
+              anonymousCandidateId,
+              result: {
+                status: "succeeded",
+                response: null,
+                judgment: durableJudgment,
+                usage: durableJudgment.modelUsage,
+                rawOutput: null,
+                error: null,
+                timedOut: false,
+                attemptCount: 1,
+              },
+              durablePath,
+              startedAt: candidateTask.startedAt ?? taskStartedAt,
+              completedAt,
+              durationMs: Math.max(
+                0,
+                Date.parse(completedAt) -
+                  Date.parse(candidateTask.startedAt ?? taskStartedAt),
+              ),
+            };
+          }
+          if (TERMINAL_TASK_STATUSES.has(candidateTask.status)) {
+            const failedResult = judgeResultFromTask(candidateTask);
+            const completedAt = candidateTask.completedAt ?? timestamp(input.clock());
+            return {
+              anonymousCandidateId,
+              result: failedResult,
+              durablePath: null,
+              startedAt: candidateTask.startedAt ?? taskStartedAt,
+              completedAt,
+              durationMs: Math.max(
+                0,
+                Date.parse(completedAt) -
+                  Date.parse(candidateTask.startedAt ?? taskStartedAt),
+              ),
+            };
+          }
+          if (candidateTask.status === "running") {
+            const uncertain = await markTaskUncertain(
+              input.generationPath,
+              input.generationId,
+              "judge",
+              taskTargetId,
+              input.clock,
+              "judge task was running when the generation was resumed; request outcome is uncertain",
+            );
+            const completedAt = uncertain.completedAt ?? timestamp(input.clock());
+            return {
+              anonymousCandidateId,
+              result: judgeResultFromTask(uncertain),
+              durablePath: null,
+              startedAt: uncertain.startedAt ?? taskStartedAt,
+              completedAt,
+              durationMs: Math.max(
+                0,
+                Date.parse(completedAt) -
+                  Date.parse(uncertain.startedAt ?? taskStartedAt),
+              ),
+            };
+          }
+          await beginTask(
             input.generationPath,
             input.generationId,
             "judge",
             taskTargetId,
             input.clock,
-            "judge task was running when the generation was resumed; request outcome is uncertain",
           );
-          const completedAt = uncertain.completedAt ?? timestamp(input.clock());
-          return {
-            anonymousCandidateId,
-            result: judgeResultFromTask(uncertain),
-            durablePath: null,
-            startedAt: uncertain.startedAt ?? taskStartedAt,
-            completedAt,
-            durationMs: Math.max(
-              0,
-              Date.parse(completedAt) -
-                Date.parse(uncertain.startedAt ?? taskStartedAt),
-            ),
-          };
         }
-        await beginTask(
-          input.generationPath,
-          input.generationId,
-          "judge",
-          taskTargetId,
-          input.clock,
+        const candidateWorkspace = join(judgePath, "workspaces", anonymousCandidateId);
+        const rawOutputPath = join(judgePath, "raw", `${anonymousCandidateId}.json`);
+        let acceptedResult: JudgeCandidateResult = makeJudgeCandidateFailure(
+          "candidate staging did not complete",
         );
-      }
-      const candidateWorkspace = join(judgePath, "workspaces", anonymousCandidateId);
-      const rawOutputPath = join(judgePath, "raw", `${anonymousCandidateId}.json`);
-      let acceptedResult: JudgeCandidateResult = makeJudgeCandidateFailure(
-        "candidate staging did not complete",
-      );
-      let durablePath: string | null = null;
-      let taskCompletedAt = taskStartedAt;
-      let taskDurationMs = 0;
-      try {
-        await mkdir(candidateWorkspace, { recursive: true });
-        await stageFile(
-          contestant.screenshotPath,
-          join(candidateWorkspace, "candidate.png"),
-        );
-        const sanitisedCssPath = join(
-          input.generationPath,
-          "contestants",
-          contestant.contestantId,
-          "sanitised.css",
-        );
-        if (contestant.validation.sanitisedSha256 === null) {
-          throw new Error("valid contestant is missing its sanitised CSS hash");
-        }
-        await verifyRegularFileHash(
-          sanitisedCssPath,
-          contestant.validation.sanitisedSha256,
-          "durable sanitised CSS",
-        );
-        await stageFile(sanitisedCssPath, join(candidateWorkspace, "candidate.css"));
-        await stageFile(contact.outputPath, join(candidateWorkspace, "cohort.png"));
-        const prompt = buildJudgeCandidatePrompt({
-          generationId: input.generationId,
-          judgeId: input.judge.id,
-          anonymousCandidateId,
-        });
-        const promptPath = join(candidateWorkspace, "prompt.md");
-        await writeTextAtomically(promptPath, prompt);
-        await writeTextAtomically(
-          join(judgePath, "prompts", `${anonymousCandidateId}.md`),
-          prompt,
-        );
-        acceptedResult = await judgeOne(input.adapter, {
-          generationId: input.generationId,
-          judgeId: input.judge.id,
-          anonymousCandidateId,
-          judge: input.judge,
-          workspacePath: candidateWorkspace,
-          promptPath,
-          candidateScreenshotPath: join(candidateWorkspace, "candidate.png"),
-          contactSheetPath: join(candidateWorkspace, "cohort.png"),
-          sanitisedCssPath: join(candidateWorkspace, "candidate.css"),
-          judgmentPath: join(candidateWorkspace, "judgment.json"),
-          rawOutputPath,
-          usageOutputPath: join(candidateWorkspace, "usage.json"),
-          stdoutLogPath: join(
+        let durablePath: string | null = null;
+        let taskCompletedAt = taskStartedAt;
+        let taskDurationMs = 0;
+        try {
+          await mkdir(candidateWorkspace, { recursive: true });
+          await stageFile(
+            contestant.screenshotPath,
+            join(candidateWorkspace, "candidate.png"),
+          );
+          const sanitisedCssPath = join(
             input.generationPath,
-            "logs",
-            `judge-${input.judge.id}-${anonymousCandidateId}.stdout.log`,
-          ),
-          stderrLogPath: join(
-            input.generationPath,
-            "logs",
-            `judge-${input.judge.id}-${anonymousCandidateId}.stderr.log`,
-          ),
-          timeoutMs: budget.timeoutMs,
-          maximumOutputTokens: budget.maximumOutputTokens,
-        });
-        if (acceptedResult.status === "succeeded") {
-          if (acceptedResult.judgment === null) {
-            acceptedResult = {
-              ...acceptedResult,
-              status: "invalid",
-              response: null,
-              judgment: null,
-              error: "judge adapter reported success without a durable judgment",
-            };
-          } else {
-            const durable = CandidateJudgmentSchema.parse(acceptedResult.judgment);
-            durablePath = join(judgePath, `${anonymousCandidateId}.json`);
-            await writeJsonArtifact(durablePath, CandidateJudgmentSchema, durable);
+            "contestants",
+            contestant.contestantId,
+            "sanitised.css",
+          );
+          if (contestant.validation.sanitisedSha256 === null) {
+            throw new Error("valid contestant is missing its sanitised CSS hash");
           }
-        }
-        if (
-          acceptedResult.rawOutput !== null ||
-          acceptedResult.status !== "succeeded"
-        ) {
+          await verifyRegularFileHash(
+            sanitisedCssPath,
+            contestant.validation.sanitisedSha256,
+            "durable sanitised CSS",
+          );
+          await stageFile(sanitisedCssPath, join(candidateWorkspace, "candidate.css"));
+          await stageFile(contact.outputPath, join(candidateWorkspace, "cohort.png"));
+          const prompt = buildJudgeCandidatePrompt({
+            generationId: input.generationId,
+            judgeId: input.judge.id,
+            anonymousCandidateId,
+          });
+          const promptPath = join(candidateWorkspace, "prompt.md");
+          await writeTextAtomically(promptPath, prompt);
+          await writeTextAtomically(
+            join(judgePath, "prompts", `${anonymousCandidateId}.md`),
+            prompt,
+          );
+          acceptedResult = await judgeOne(input.adapter, {
+            generationId: input.generationId,
+            judgeId: input.judge.id,
+            anonymousCandidateId,
+            judge: input.judge,
+            workspacePath: candidateWorkspace,
+            promptPath,
+            candidateScreenshotPath: join(candidateWorkspace, "candidate.png"),
+            contactSheetPath: join(candidateWorkspace, "cohort.png"),
+            sanitisedCssPath: join(candidateWorkspace, "candidate.css"),
+            judgmentPath: join(candidateWorkspace, "judgment.json"),
+            rawOutputPath,
+            usageOutputPath: join(candidateWorkspace, "usage.json"),
+            stdoutLogPath: join(
+              input.generationPath,
+              "logs",
+              `judge-${input.judge.id}-${anonymousCandidateId}.stdout.log`,
+            ),
+            stderrLogPath: join(
+              input.generationPath,
+              "logs",
+              `judge-${input.judge.id}-${anonymousCandidateId}.stderr.log`,
+            ),
+            timeoutMs: budget.timeoutMs,
+            maximumOutputTokens: budget.maximumOutputTokens,
+          });
+          if (acceptedResult.status === "succeeded") {
+            if (acceptedResult.judgment === null) {
+              acceptedResult = {
+                ...acceptedResult,
+                status: "invalid",
+                response: null,
+                judgment: null,
+                error: "judge adapter reported success without a durable judgment",
+              };
+            } else {
+              const durable = CandidateJudgmentSchema.parse(acceptedResult.judgment);
+              durablePath = join(judgePath, `${anonymousCandidateId}.json`);
+              await writeJsonArtifact(durablePath, CandidateJudgmentSchema, durable);
+            }
+          }
+          if (
+            acceptedResult.rawOutput !== null ||
+            acceptedResult.status !== "succeeded"
+          ) {
+            await archiveRawOutput(
+              rawOutputPath,
+              acceptedResult.rawOutput,
+              acceptedResult.error,
+            );
+          }
+          if (await regularFileExists(join(candidateWorkspace, "usage.json"))) {
+            const usageCopied = await copyDeclaredFile(
+              join(candidateWorkspace, "usage.json"),
+              join(judgePath, "usage", `${anonymousCandidateId}.json`),
+              DEFAULT_USAGE_LIMIT_BYTES,
+            );
+            if (!usageCopied) {
+              throw new Error("candidate usage metadata could not be archived");
+            }
+          }
+        } catch (error) {
+          if (durablePath !== null) {
+            await rm(durablePath, { force: true }).catch(() => undefined);
+            durablePath = null;
+          }
+          acceptedResult = {
+            ...makeJudgeCandidateFailure(error),
+            rawOutput: acceptedResult.rawOutput,
+            error: `candidate assessment failed: ${boundedError(error)}`,
+          };
+          await writePrivateFailure(
+            rawOutputPath.replace(/\.json$/u, ".failure.txt"),
+            acceptedResult.error,
+          );
           await archiveRawOutput(
             rawOutputPath,
             acceptedResult.rawOutput,
             acceptedResult.error,
+          ).catch(() => undefined);
+        } finally {
+          await removeWorkspace(candidateWorkspace);
+          const taskCompleted = input.clock();
+          taskCompletedAt = timestamp(taskCompleted);
+          taskDurationMs = Math.max(0, taskCompleted.getTime() - taskStarted.getTime());
+        }
+        if (input.resumable === true) {
+          await finishTask(
+            input.generationPath,
+            input.generationId,
+            "judge",
+            taskTargetId,
+            judgeTaskStatus(acceptedResult),
+            input.clock,
+            acceptedResult.error,
+            null,
           );
+          await notifyTask(input.afterTask, {
+            role: "judge",
+            targetId: taskTargetId,
+            taskId: taskIdentifier(input.generationId, "judge", taskTargetId),
+          });
         }
-        if (await regularFileExists(join(candidateWorkspace, "usage.json"))) {
-          const usageCopied = await copyDeclaredFile(
-            join(candidateWorkspace, "usage.json"),
-            join(judgePath, "usage", `${anonymousCandidateId}.json`),
-            DEFAULT_USAGE_LIMIT_BYTES,
-          );
-          if (!usageCopied) {
-            throw new Error("candidate usage metadata could not be archived");
-          }
-        }
-      } catch (error) {
-        if (durablePath !== null) {
-          await rm(durablePath, { force: true }).catch(() => undefined);
-          durablePath = null;
-        }
-        acceptedResult = {
-          ...makeJudgeCandidateFailure(error),
-          rawOutput: acceptedResult.rawOutput,
-          error: `candidate assessment failed: ${boundedError(error)}`,
+        return {
+          anonymousCandidateId,
+          result: acceptedResult,
+          durablePath,
+          startedAt: taskStartedAt,
+          completedAt: taskCompletedAt,
+          durationMs: taskDurationMs,
         };
-        await writePrivateFailure(
-          rawOutputPath.replace(/\.json$/u, ".failure.txt"),
-          acceptedResult.error,
-        );
-        await archiveRawOutput(
-          rawOutputPath,
-          acceptedResult.rawOutput,
-          acceptedResult.error,
-        ).catch(() => undefined);
-      } finally {
-        await removeWorkspace(candidateWorkspace);
-        const taskCompleted = input.clock();
-        taskCompletedAt = timestamp(taskCompleted);
-        taskDurationMs = Math.max(0, taskCompleted.getTime() - taskStarted.getTime());
-      }
-      if (input.resumable === true) {
-        await finishTask(
-          input.generationPath,
-          input.generationId,
-          "judge",
-          taskTargetId,
-          judgeTaskStatus(acceptedResult),
-          input.clock,
-          acceptedResult.error,
-          null,
-        );
-        await notifyTask(input.afterTask, {
-          role: "judge",
-          targetId: taskTargetId,
-          taskId: taskIdentifier(input.generationId, "judge", taskTargetId),
-        });
-      }
-      return {
-        anonymousCandidateId,
-        result: acceptedResult,
-        durablePath,
-        startedAt: taskStartedAt,
-        completedAt: taskCompletedAt,
-        durationMs: taskDurationMs,
-      };
-    },
-  ).finally(() => removeWorkspace(join(judgePath, "workspaces")));
+      },
+    )
+    .finally(() => removeWorkspace(join(judgePath, "workspaces")));
 
   const validJudgmentResults = successfulJudgmentResults(candidateResults);
   const allCandidateAssessmentsValid =
@@ -3163,6 +3156,56 @@ async function runOneJudge(input: {
   };
 }
 
+async function judgeCandidateNeedsAdapterCall(input: {
+  readonly generationPath: string;
+  readonly generationId: string;
+  readonly judge: JudgeConfig;
+  readonly judgePath: string;
+  readonly anonymousCandidateId: string;
+  readonly contestant: WaveBContestantResult | undefined;
+  readonly resumable: boolean;
+}): Promise<boolean> {
+  if (!input.resumable) return true;
+  if (input.contestant === undefined || input.contestant.screenshotPath === null) {
+    return false;
+  }
+  const task = await ensurePendingTaskState(
+    input.generationPath,
+    input.generationId,
+    "judge",
+    `${input.judge.id}\0${input.anonymousCandidateId}`,
+  );
+  if (task.status !== "pending") return false;
+  return (
+    (await readReusableCandidateJudgment(
+      join(input.judgePath, `${input.anonymousCandidateId}.json`),
+      input.generationId,
+      input.judge.id,
+      input.anonymousCandidateId,
+    )) === null
+  );
+}
+
+async function contestantNeedsAdapterCall(input: {
+  readonly generationPath: string;
+  readonly generationId: string;
+  readonly contestant: ContestantConfig;
+  readonly resumable: boolean;
+}): Promise<boolean> {
+  if (!input.resumable) return true;
+  const run = await readJsonWithSchema(
+    join(input.generationPath, "contestants", input.contestant.id, "run.json"),
+    RunSchema,
+  );
+  const task = await ensurePendingTaskState(
+    input.generationPath,
+    input.generationId,
+    "contestant",
+    input.contestant.id,
+  );
+  return run.status === "pending" && task.status === "pending";
+}
+
 async function loadGenerationPath(options: WaveBRunOptions): Promise<string> {
   if (options.generationPath !== undefined) return resolve(options.generationPath);
   if (options.seasonId === undefined)
@@ -3295,6 +3338,12 @@ export async function runWaveB(options: WaveBRunOptions): Promise<WaveBRunResult
     if (refusal !== null) throw new Error(refusal);
   }
 
+  const contestantScheduler = new ResourceAwareScheduler({
+    globalMaximumConcurrency: Math.min(4, contestantsConfig.defaults.concurrency),
+    resourceGroups: contestantsConfig.resourceGroups ?? {},
+    ...(options.schedulerTime === undefined ? {} : { time: options.schedulerTime }),
+  });
+
   await updateManifest(generationPath, {
     status: "contestants_running",
     startedAt: manifest.startedAt ?? operationTimestamp,
@@ -3344,37 +3393,50 @@ export async function runWaveB(options: WaveBRunOptions): Promise<WaveBRunResult
       ]),
     );
   }
-  const contestantResults = await mapConcurrent(
-    contestants,
-    Math.min(4, contestantsConfig.defaults.concurrency),
-    async (contestant) => {
-      const anonymousCandidateId = anonymousByContestant.get(contestant.id);
-      if (anonymousCandidateId === undefined)
-        throw new Error(`anonymous map is missing ${contestant.id}`);
-      const adapter =
-        options.contestantAdapters?.get(contestant.id) ??
-        options.contestantAdapterFactory?.(contestant) ??
-        defaultContestantAdapter(options.repositoryRoot, contestant);
-      const contestantInput: RunContestantInput = {
+  const contestantItems = await Promise.all(
+    contestants.map(async (contestant) => {
+      const needsAdapterCall = await contestantNeedsAdapterCall({
         generationPath,
         generationId: manifest.generationId,
         contestant,
-        contestantsConfig,
-        challengeConfig,
-        anonymousCandidateId,
-        clock,
-        canonicalState,
-        adapter,
-        renderer,
-      };
-      return options.resumable === true
-        ? runOneContestantResumable({
-            ...contestantInput,
-            options,
-          })
-        : runOneContestant(contestantInput);
-    },
+        resumable: options.resumable === true,
+      });
+      const resourceGroup = contestant.execution?.resourceGroup;
+      return needsAdapterCall && resourceGroup !== undefined
+        ? { value: contestant, resourceGroup }
+        : { value: contestant };
+    }),
   );
+  const contestantResults = await contestantScheduler.map<
+    ContestantConfig,
+    WaveBContestantResult
+  >(contestantItems, async (contestant) => {
+    const anonymousCandidateId = anonymousByContestant.get(contestant.id);
+    if (anonymousCandidateId === undefined)
+      throw new Error(`anonymous map is missing ${contestant.id}`);
+    const adapter =
+      options.contestantAdapters?.get(contestant.id) ??
+      options.contestantAdapterFactory?.(contestant) ??
+      defaultContestantAdapter(options.repositoryRoot, contestant);
+    const contestantInput: RunContestantInput = {
+      generationPath,
+      generationId: manifest.generationId,
+      contestant,
+      contestantsConfig,
+      challengeConfig,
+      anonymousCandidateId,
+      clock,
+      canonicalState,
+      adapter,
+      renderer,
+    };
+    return options.resumable === true
+      ? runOneContestantResumable({
+          ...contestantInput,
+          options,
+        })
+      : runOneContestant(contestantInput);
+  });
   const canonicalFailure = contestantResults.find(
     (result) => result.canonicalIntegrityFailed,
   );
@@ -3391,6 +3453,11 @@ export async function runWaveB(options: WaveBRunOptions): Promise<WaveBRunResult
   await updateManifest(generationPath, { status: "contestants_complete" });
   await updateManifest(generationPath, { status: "renders_complete" });
   const judgeResults: WaveBJudgeResult[] = [];
+  const judgeScheduler = new ResourceAwareScheduler({
+    globalMaximumConcurrency: Math.min(2, judgesConfig.defaults.concurrencyPerJudge),
+    resourceGroups: judgesConfig.resourceGroups ?? {},
+    ...(options.schedulerTime === undefined ? {} : { time: options.schedulerTime }),
+  });
   for (const [index, judge] of judges.entries()) {
     let result: WaveBJudgeResult;
     try {
@@ -3407,6 +3474,7 @@ export async function runWaveB(options: WaveBRunOptions): Promise<WaveBRunResult
         clock,
         randomBytes,
         adapter,
+        scheduler: judgeScheduler,
         contactSheetBuilder,
         ...(options.resumable === undefined ? {} : { resumable: options.resumable }),
         ...(options.afterTask === undefined ? {} : { afterTask: options.afterTask }),

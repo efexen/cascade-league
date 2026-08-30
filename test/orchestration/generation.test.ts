@@ -1,8 +1,18 @@
 import { createHash } from "node:crypto";
-import { chmod, cp, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  cp,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import { createGeneration } from "../../src/artifacts/generation.js";
 import {
@@ -298,6 +308,358 @@ describe("complete generation orchestration", () => {
     for (const judgeId of ["fixture-critic-a", "fixture-critic-b"]) {
       expect(maximumJudges.get(judgeId)).toBeGreaterThan(1);
       expect(maximumJudges.get(judgeId)).toBeLessThanOrEqual(2);
+    }
+  }, 30000);
+
+  it("paces only genuinely pending adapter calls when resuming schema-v2 production artifacts", async () => {
+    const mirrorRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-resumable-v2-repository-"),
+    );
+    await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
+      recursive: true,
+    });
+    const profileRoot = join(mirrorRoot, "config/profiles/fixture");
+    await mkdir(profileRoot, { recursive: true });
+    const sourceContestants = parseYaml(
+      await readFile(
+        join(repositoryRoot, "config/profiles/fixture/contestants.yaml"),
+        "utf8",
+      ),
+    ) as {
+      defaults: Record<string, unknown>;
+      contestants: Array<Record<string, unknown>>;
+    };
+    const baseContestant = sourceContestants.contestants[0]!;
+    const contestantFixtures = [
+      ["fixture-terminal", "editorial"],
+      ["fixture-uncertain", "geometric"],
+      ["fixture-render-only", "generic"],
+      ["fixture-pending-a", "editorial"],
+      ["fixture-pending-b", "geometric"],
+    ] as const;
+    await writeFile(
+      join(profileRoot, "contestants.yaml"),
+      stringifyYaml({
+        schemaVersion: 2,
+        defaults: sourceContestants.defaults,
+        resourceGroups: {
+          lane: { maximumConcurrency: 2, minimumStartIntervalMs: 100 },
+        },
+        contestants: contestantFixtures.map(([id, fixture]) => ({
+          ...baseContestant,
+          id,
+          displayName: id,
+          harness: {
+            name: "fixture-harness",
+            version: "1.0.0",
+            adapter: "fixture",
+            fixture,
+          },
+          model: {
+            provider: "local-fixture",
+            name: `${id}-model`,
+            version: "1.0.0",
+          },
+          execution: {
+            resourceGroup: "lane",
+            oneShotEnforcement: "enforced",
+          },
+          enabled: true,
+        })),
+      }),
+      "utf8",
+    );
+    const sourceJudges = parseYaml(
+      await readFile(
+        join(repositoryRoot, "config/profiles/fixture/judges.yaml"),
+        "utf8",
+      ),
+    ) as {
+      defaults: Record<string, unknown>;
+      judges: Array<Record<string, unknown>>;
+    };
+    await writeFile(
+      join(profileRoot, "judges.yaml"),
+      stringifyYaml({
+        schemaVersion: 2,
+        defaults: sourceJudges.defaults,
+        resourceGroups: {
+          lane: { maximumConcurrency: 2, minimumStartIntervalMs: 100 },
+        },
+        judges: [
+          {
+            ...sourceJudges.judges[0]!,
+            execution: {
+              resourceGroup: "lane",
+              oneShotEnforcement: "enforced",
+            },
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-resumable-v2-generation-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot: mirrorRoot,
+      generationsRoot,
+      seasonId: "0001",
+      profileId: "fixture",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    const pendingRunBytes = new Map(
+      await Promise.all(
+        ["fixture-pending-a", "fixture-pending-b"].map(
+          async (id) =>
+            [
+              id,
+              await readFile(
+                join(generation.generationPath, "contestants", id, "run.json"),
+              ),
+            ] as const,
+        ),
+      ),
+    );
+    const workspaceBackupRoot = join(generationsRoot, "workspace-backups");
+    await mkdir(workspaceBackupRoot);
+    for (const id of ["fixture-pending-a", "fixture-pending-b"]) {
+      await cp(
+        join(generation.generationPath, "contestants", id, "workspace"),
+        join(workspaceBackupRoot, id),
+        { recursive: true },
+      );
+    }
+    const contestantFixture = new FixtureContestantAdapter({
+      fixtureRoot: join(repositoryRoot, "test/fixtures/contestants"),
+    });
+    const judgeFixture = new FixtureJudgeAdapter();
+    const firstPass = await runWaveB({
+      repositoryRoot: mirrorRoot,
+      generationPath: generation.generationPath,
+      resumable: true,
+      contestantAdapterFactory: () => ({
+        run: (input) => contestantFixture.run(input),
+      }),
+      judgeAdapterFactory: () => ({
+        scoreCandidate: (input) => judgeFixture.scoreCandidate(input),
+        createAwards: (input) => judgeFixture.createAwards(input),
+      }),
+    });
+    const anonymousByContestant = new Map(
+      firstPass.contestants.map((contestant) => [
+        contestant.contestantId,
+        contestant.anonymousCandidateId,
+      ]),
+    );
+    const judgeId = firstPass.judges[0]!.judgeId;
+    const artifactPaths = [
+      "contestants/fixture-terminal/submission.css",
+      "contestants/fixture-terminal/screenshot.png",
+      "contestants/fixture-render-only/submission.css",
+      `judging/${judgeId}/${anonymousByContestant.get("fixture-terminal")!}.json`,
+    ];
+    const artifactHashes = new Map(
+      await Promise.all(
+        artifactPaths.map(
+          async (path) =>
+            [
+              path,
+              createHash("sha256")
+                .update(await readFile(join(generation.generationPath, path)))
+                .digest("hex"),
+            ] as const,
+        ),
+      ),
+    );
+
+    const uncertainPath = join(
+      generation.generationPath,
+      "contestants/fixture-uncertain",
+    );
+    const uncertainRun = RunSchema.parse(
+      JSON.parse(await readFile(join(uncertainPath, "run.json"), "utf8")) as unknown,
+    );
+    await writeFile(
+      join(uncertainPath, "run.json"),
+      `${JSON.stringify(
+        RunSchema.parse({
+          ...uncertainRun,
+          status: "running",
+          completedAt: null,
+          durationMs: null,
+        }),
+        null,
+        2,
+      )}\n`,
+    );
+    const uncertainTaskPath = join(uncertainPath, "task.json");
+    const uncertainTask = TaskStateSchema.parse(
+      JSON.parse(await readFile(uncertainTaskPath, "utf8")) as unknown,
+    );
+    await writeFile(
+      uncertainTaskPath,
+      `${JSON.stringify(
+        TaskStateSchema.parse({
+          ...uncertainTask,
+          status: "running",
+          completedAt: null,
+          requestAccepted: true,
+          error: null,
+        }),
+        null,
+        2,
+      )}\n`,
+    );
+    await rm(join(uncertainPath, "screenshot.png"));
+
+    const renderOnlyPath = join(
+      generation.generationPath,
+      "contestants/fixture-render-only",
+    );
+    await rm(join(renderOnlyPath, "validation.json"));
+    await rm(join(renderOnlyPath, "screenshot.png"));
+    await rm(join(renderOnlyPath, "render-task.json"));
+    for (const id of ["fixture-pending-a", "fixture-pending-b"]) {
+      const contestantPath = join(generation.generationPath, "contestants", id);
+      await writeFile(join(contestantPath, "run.json"), pendingRunBytes.get(id)!);
+      await cp(join(workspaceBackupRoot, id), join(contestantPath, "workspace"), {
+        recursive: true,
+      });
+      await Promise.all(
+        [
+          "task.json",
+          "render-task.json",
+          "submission.css",
+          "sanitised.css",
+          "validation.json",
+          "screenshot.png",
+        ].map((file) => rm(join(contestantPath, file), { force: true })),
+      );
+    }
+
+    const runningJudgeCandidate = anonymousByContestant.get("fixture-render-only")!;
+    const runningJudgeTaskPath = join(
+      generation.generationPath,
+      "judging",
+      judgeId,
+      "tasks",
+      `${runningJudgeCandidate}.json`,
+    );
+    const runningJudgeTask = TaskStateSchema.parse(
+      JSON.parse(await readFile(runningJudgeTaskPath, "utf8")) as unknown,
+    );
+    await rm(
+      join(
+        generation.generationPath,
+        "judging",
+        judgeId,
+        `${runningJudgeCandidate}.json`,
+      ),
+    );
+    await writeFile(
+      runningJudgeTaskPath,
+      `${JSON.stringify(
+        TaskStateSchema.parse({
+          ...runningJudgeTask,
+          status: "running",
+          completedAt: null,
+          requestAccepted: true,
+          error: null,
+        }),
+        null,
+        2,
+      )}\n`,
+    );
+    for (const id of ["fixture-pending-a", "fixture-pending-b"]) {
+      const anonymousCandidateId = anonymousByContestant.get(id)!;
+      await rm(
+        join(
+          generation.generationPath,
+          "judging",
+          judgeId,
+          `${anonymousCandidateId}.json`,
+        ),
+      );
+      await rm(
+        join(
+          generation.generationPath,
+          "judging",
+          judgeId,
+          "tasks",
+          `${anonymousCandidateId}.json`,
+        ),
+      );
+    }
+    await Promise.all(
+      ["awards.json", "awards-task.json"].map((file) =>
+        rm(join(generation.generationPath, "judging", judgeId, file), {
+          force: true,
+        }),
+      ),
+    );
+
+    let schedulerNow = 0;
+    const waits: number[] = [];
+    const contestantStarts: Array<[string, number]> = [];
+    const judgeStarts: Array<[string, number]> = [];
+    const result = await runGeneration({
+      repositoryRoot: mirrorRoot,
+      generationPath: generation.generationPath,
+      generatedAt: "2026-08-28T20:15:00.000Z",
+      schedulerTime: {
+        nowMs: () => schedulerNow,
+        wait: async (delayMs) => {
+          waits.push(delayMs);
+          schedulerNow += delayMs;
+        },
+      },
+      clock: () => new Date(Date.parse("2026-08-28T20:00:00.000Z") + schedulerNow),
+      contestantAdapterFactory: () => ({
+        run: (input) => {
+          contestantStarts.push([input.contestantId, schedulerNow]);
+          return contestantFixture.run(input);
+        },
+      }),
+      judgeAdapterFactory: () => ({
+        scoreCandidate: (input) => {
+          judgeStarts.push([input.anonymousCandidateId, schedulerNow]);
+          return judgeFixture.scoreCandidate(input);
+        },
+        createAwards: (input) => judgeFixture.createAwards(input),
+      }),
+    });
+
+    expect(contestantStarts.map(([id]) => id)).toEqual([
+      "fixture-pending-a",
+      "fixture-pending-b",
+    ]);
+    expect(new Set(judgeStarts.map(([id]) => id))).toEqual(
+      new Set([
+        anonymousByContestant.get("fixture-pending-a")!,
+        anonymousByContestant.get("fixture-pending-b")!,
+      ]),
+    );
+    expect(waits).toEqual([100, 100]);
+    expect(
+      RunSchema.parse(
+        JSON.parse(await readFile(join(uncertainPath, "run.json"), "utf8")) as unknown,
+      ).status,
+    ).toBe("uncertain");
+    expect(
+      TaskStateSchema.parse(
+        JSON.parse(await readFile(runningJudgeTaskPath, "utf8")) as unknown,
+      ).status,
+    ).toBe("uncertain");
+    expect(result.leaderboard.entries).toHaveLength(5);
+    for (const [path, hash] of artifactHashes) {
+      expect(
+        createHash("sha256")
+          .update(await readFile(join(generation.generationPath, path)))
+          .digest("hex"),
+      ).toBe(hash);
     }
   }, 30000);
 

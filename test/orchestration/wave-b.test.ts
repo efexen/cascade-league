@@ -43,6 +43,242 @@ import type { JudgeAdapter } from "../../src/judging/index.js";
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
 
 describe("Wave-B fixture orchestration", () => {
+  it("applies schema-v2 contestant groups with FIFO pacing and durable wait-free timings", async () => {
+    const mirrorRoot = await mkdtemp(join(tmpdir(), "local-maxima-wave-b-v2-repo-"));
+    await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
+      recursive: true,
+    });
+    await mkdir(join(mirrorRoot, "config/profiles/fixture"), { recursive: true });
+    const contestantsConfig = parseYaml(
+      await readFile(
+        join(repositoryRoot, "config/profiles/fixture/contestants.yaml"),
+        "utf8",
+      ),
+    ) as {
+      schemaVersion: number;
+      resourceGroups?: Record<string, unknown>;
+      contestants: Record<string, unknown>[];
+    };
+    contestantsConfig.schemaVersion = 2;
+    contestantsConfig.resourceGroups = {
+      alpha: { maximumConcurrency: 1, minimumStartIntervalMs: 750 },
+      beta: { maximumConcurrency: 1, minimumStartIntervalMs: 0 },
+    };
+    contestantsConfig.contestants = contestantsConfig.contestants.map(
+      (contestant, index) => ({
+        ...contestant,
+        execution: {
+          resourceGroup: index === 1 ? "beta" : "alpha",
+          oneShotEnforcement: "enforced",
+        },
+      }),
+    );
+    await writeFile(
+      join(mirrorRoot, "config/profiles/fixture/contestants.yaml"),
+      stringifyYaml(contestantsConfig),
+      "utf8",
+    );
+    await writeFile(
+      join(mirrorRoot, "config/profiles/fixture/judges.yaml"),
+      await readFile(join(repositoryRoot, "config/profiles/fixture/judges.yaml")),
+      "utf8",
+    );
+
+    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-wave-b-v2-"));
+    const generation = await createGeneration({
+      repositoryRoot: mirrorRoot,
+      generationsRoot,
+      seasonId: "0001",
+      profileId: "fixture",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    let schedulerNow = 0;
+    const fixture = new FixtureContestantAdapter({
+      fixtureRoot: join(repositoryRoot, "test/fixtures/contestants"),
+    });
+    const result = await runWaveB({
+      repositoryRoot: mirrorRoot,
+      generationPath: generation.generationPath,
+      contestantAdapterFactory: () => ({
+        run: (input) => fixture.run(input),
+      }),
+      schedulerTime: {
+        nowMs: () => schedulerNow,
+        wait: async (delayMs) => {
+          schedulerNow += delayMs;
+        },
+      },
+      clock: () => new Date(Date.parse("2026-08-28T20:00:00.000Z") + schedulerNow),
+    });
+
+    expect(result.contestants.map((entry) => entry.contestantId)).toEqual([
+      "fixture-editorial",
+      "fixture-geometric",
+      "fixture-generic",
+    ]);
+    const started = result.contestants.map((entry) => [
+      entry.contestantId,
+      Date.parse(entry.run.startedAt!),
+      entry.run.durationMs,
+    ]);
+    expect(started[0]?.[1]).toBe(Date.parse("2026-08-28T20:00:00.000Z"));
+    expect(started[2]?.[1]).toBe(Date.parse("2026-08-28T20:00:00.750Z"));
+    expect(started[2]?.[2]).toBe(0);
+    expect(started[0]?.[2]).toBe(0);
+  }, 30000);
+
+  it("runs judge assessments in stored order with retained group pacing and awards only after valid results", async () => {
+    const mirrorRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-judge-v2-repo-"),
+    );
+    await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
+      recursive: true,
+    });
+    await mkdir(join(mirrorRoot, "config/profiles/fixture"), { recursive: true });
+    await writeFile(
+      join(mirrorRoot, "config/profiles/fixture/contestants.yaml"),
+      await readFile(join(repositoryRoot, "config/profiles/fixture/contestants.yaml")),
+      "utf8",
+    );
+    const judgesConfig = parseYaml(
+      await readFile(
+        join(repositoryRoot, "config/profiles/fixture/judges.yaml"),
+        "utf8",
+      ),
+    ) as {
+      schemaVersion: number;
+      resourceGroups?: Record<string, unknown>;
+      judges: Record<string, unknown>[];
+    };
+    judgesConfig.schemaVersion = 2;
+    judgesConfig.resourceGroups = {
+      jury: { maximumConcurrency: 2, minimumStartIntervalMs: 250 },
+    };
+    judgesConfig.judges = judgesConfig.judges.map((judge) => ({
+      ...judge,
+      execution: { resourceGroup: "jury", oneShotEnforcement: "enforced" },
+    }));
+    await writeFile(
+      join(mirrorRoot, "config/profiles/fixture/judges.yaml"),
+      stringifyYaml(judgesConfig),
+      "utf8",
+    );
+
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-judge-v2-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot: mirrorRoot,
+      generationsRoot,
+      seasonId: "0001",
+      profileId: "fixture",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    let schedulerNow = 0;
+    const fixtureContestant = new FixtureContestantAdapter({
+      fixtureRoot: join(repositoryRoot, "test/fixtures/contestants"),
+    });
+    const fixtureJudge = new FixtureJudgeAdapter();
+    const events: string[] = [];
+    const starts = new Map<string, number>();
+    const assessmentCalls = new Map<string, number>();
+    const adapterOrder = new Map<string, string[]>();
+    const releaseFirst = new Map<string, () => void>();
+    const firstReady = new Map<string, Promise<void>>();
+    const judgeAdapters = new Map<string, JudgeAdapter>(
+      ["fixture-critic-a", "fixture-critic-b"].map((judgeId) => [
+        judgeId,
+        {
+          scoreCandidate: async (input) => {
+            const key = `${input.judgeId}/${input.anonymousCandidateId}`;
+            starts.set(key, schedulerNow);
+            events.push(`start:${key}`);
+            const callNumber = (assessmentCalls.get(input.judgeId) ?? 0) + 1;
+            assessmentCalls.set(input.judgeId, callNumber);
+            const order = adapterOrder.get(input.judgeId) ?? [];
+            order.push(key);
+            adapterOrder.set(input.judgeId, order);
+            if (callNumber === 1) {
+              firstReady.set(
+                input.judgeId,
+                new Promise<void>((resolve) =>
+                  releaseFirst.set(input.judgeId, resolve),
+                ),
+              );
+            }
+            if (callNumber === 3) releaseFirst.get(input.judgeId)?.();
+            const result = await fixtureJudge.scoreCandidate(input);
+            if (callNumber === 1) await firstReady.get(input.judgeId);
+            else await new Promise<void>((resolve) => setTimeout(resolve, 1));
+            events.push(`done:${key}`);
+            return result;
+          },
+          createAwards: async (input) => {
+            events.push(`awards:${input.judgeId}`);
+            expect(
+              events.filter((event) => event.startsWith(`done:${input.judgeId}/`)),
+            ).toHaveLength(3);
+            return fixtureJudge.createAwards(input);
+          },
+        },
+      ]),
+    );
+    const result = await runWaveB({
+      repositoryRoot: mirrorRoot,
+      generationPath: generation.generationPath,
+      contestantAdapters: new Map(
+        ["fixture-editorial", "fixture-geometric", "fixture-generic"].map((id) => [
+          id,
+          {
+            run: (input: Parameters<typeof fixtureContestant.run>[0]) =>
+              fixtureContestant.run(input),
+          },
+        ]),
+      ),
+      judgeAdapters,
+      schedulerTime: {
+        nowMs: () => schedulerNow,
+        wait: async (delayMs) => {
+          schedulerNow += delayMs;
+        },
+      },
+      clock: () => new Date(Date.parse("2026-08-28T20:00:00.000Z") + schedulerNow),
+    });
+
+    expect(result.judges).toHaveLength(2);
+    for (const judge of result.judges) {
+      expect(
+        judge.candidates.map((candidate) => candidate.anonymousCandidateId),
+      ).toEqual(judge.assessmentOrder);
+      expect(judge.awards?.status).toBe("succeeded");
+      const judgeCompletions = events
+        .filter((event) => event.startsWith(`done:${judge.judgeId}/`))
+        .map((event) => event.slice("done:".length));
+      expect(judgeCompletions).not.toEqual(adapterOrder.get(judge.judgeId));
+      expect(events.indexOf(`awards:${judge.judgeId}`)).toBeGreaterThan(
+        Math.max(
+          ...events.map((event, index) =>
+            event.startsWith(`done:${judge.judgeId}/`) ? index : -1,
+          ),
+        ),
+      );
+    }
+    const epoch = Date.parse("2026-08-28T20:00:00.000Z");
+    const firstJudgeStarts = result.judges[0]!.candidates.map(
+      (candidate) => Date.parse(candidate.startedAt) - epoch,
+    );
+    expect(firstJudgeStarts).toEqual([0, 250, 500]);
+    const secondJudgeFirst = Math.min(
+      ...result.judges[1]!.candidates.map(
+        (candidate) => Date.parse(candidate.startedAt) - epoch,
+      ),
+    );
+    expect(secondJudgeFirst).toBeGreaterThanOrEqual(750);
+    expect([...starts.values()]).toEqual([...starts.values()].sort((a, b) => a - b));
+  }, 30000);
+
   it("honors contestant and per-judge concurrency while preserving stored order", async () => {
     const generationsRoot = await mkdtemp(
       join(tmpdir(), "local-maxima-wave-b-concurrency-"),

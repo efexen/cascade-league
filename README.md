@@ -82,7 +82,11 @@ config/
   never mutated. At profile resolution every enabled command entry must declare
   `execution.resourceGroup` naming a group declared in the same file; fixture
   entries are exempt. v2 resource groups are validated and reported in the run
-  plan in this phase but not yet scheduled.
+  plan in this phase. Contestant and judge calls now use immutable
+  generation-config scheduling limits: a global concurrency cap, optional
+  per-resource-group concurrency caps, strict FIFO admission (a blocked queue
+  head is not overtaken), and minimum intervals between starts in each group.
+  Judges remain sequential, and their candidate batches share group pacing.
 
 ## Planning a generation
 
