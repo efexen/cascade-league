@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChildProcess } from "node:child_process";
@@ -11,6 +11,198 @@ import {
   runBoundedCommand,
   writeLog,
 } from "../../src/contestants/support.js";
+import {
+  DEFAULT_EXECUTION_METADATA_LIMIT_BYTES,
+  ExecutionMetadataFileSchema,
+  readExecutionMetadataFile,
+} from "../../src/contestants/support.js";
+
+const emptyMetadata = {
+  observedHarnessVersion: null,
+  observedModelVersion: null,
+  providerRequestId: null,
+};
+
+describe("execution metadata file schema", () => {
+  it("accepts a complete record, an all-null record, and partial observed fields", () => {
+    expect(
+      ExecutionMetadataFileSchema.parse({
+        schemaVersion: 1,
+        observedHarnessVersion: "harness-2.1.0",
+        observedModelVersion: "model-4.5.1",
+        providerRequestId: "req-abc-123",
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      observedHarnessVersion: "harness-2.1.0",
+      observedModelVersion: "model-4.5.1",
+      providerRequestId: "req-abc-123",
+    });
+    expect(
+      ExecutionMetadataFileSchema.parse({
+        schemaVersion: 1,
+        observedHarnessVersion: null,
+        observedModelVersion: null,
+        providerRequestId: null,
+      }),
+    ).toBeTruthy();
+    expect(
+      ExecutionMetadataFileSchema.parse({
+        schemaVersion: 1,
+        observedHarnessVersion: "harness-2.1.0",
+        observedModelVersion: null,
+        providerRequestId: null,
+      }),
+    ).toBeTruthy();
+  });
+
+  it("rejects blank values, over-long values, wrong version, and unknown keys", () => {
+    expect(() =>
+      ExecutionMetadataFileSchema.parse({
+        schemaVersion: 1,
+        observedHarnessVersion: "   ",
+        observedModelVersion: null,
+        providerRequestId: null,
+      }),
+    ).toThrow();
+    expect(() =>
+      ExecutionMetadataFileSchema.parse({
+        schemaVersion: 1,
+        observedHarnessVersion: "x".repeat(201),
+        observedModelVersion: null,
+        providerRequestId: null,
+      }),
+    ).toThrow();
+    expect(() =>
+      ExecutionMetadataFileSchema.parse({
+        schemaVersion: 1,
+        observedHarnessVersion: null,
+        observedModelVersion: null,
+        providerRequestId: "r".repeat(257),
+      }),
+    ).toThrow();
+    expect(() =>
+      ExecutionMetadataFileSchema.parse({
+        schemaVersion: 2,
+        observedHarnessVersion: null,
+        observedModelVersion: null,
+        providerRequestId: null,
+      }),
+    ).toThrow();
+    expect(() =>
+      ExecutionMetadataFileSchema.parse({
+        schemaVersion: 1,
+        observedHarnessVersion: null,
+        observedModelVersion: null,
+        providerRequestId: null,
+        secret: "leak",
+      }),
+    ).toThrow();
+  });
+});
+
+describe("readExecutionMetadataFile", () => {
+  it("returns the parsed metadata for a valid file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "local-maxima-exec-meta-"));
+    const path = join(root, "execution-metadata.json");
+    await writeFile(
+      path,
+      JSON.stringify({
+        schemaVersion: 1,
+        observedHarnessVersion: "harness-9",
+        observedModelVersion: "model-9",
+        providerRequestId: "request-9",
+      }),
+      "utf8",
+    );
+
+    const result = await readExecutionMetadataFile(path);
+
+    expect(result).toEqual({
+      metadata: {
+        observedHarnessVersion: "harness-9",
+        observedModelVersion: "model-9",
+        providerRequestId: "request-9",
+      },
+      exists: true,
+      error: null,
+    });
+  });
+
+  it("returns null metadata without error when the file is missing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "local-maxima-exec-meta-missing-"));
+    const result = await readExecutionMetadataFile(join(root, "absent.json"));
+    expect(result).toEqual({ metadata: emptyMetadata, exists: false, error: null });
+  });
+
+  it("reports a bounded error and null metadata for invalid JSON, unknown keys, and oversized files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "local-maxima-exec-meta-invalid-"));
+
+    const invalidPath = join(root, "invalid.json");
+    await writeFile(invalidPath, "{ not json", "utf8");
+    const invalid = await readExecutionMetadataFile(invalidPath);
+    expect(invalid.metadata).toEqual(emptyMetadata);
+    expect(invalid.exists).toBe(true);
+    expect(invalid.error).toMatch(/invalid/i);
+
+    const unknownKeyPath = join(root, "unknown.json");
+    await writeFile(
+      unknownKeyPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        observedHarnessVersion: null,
+        observedModelVersion: null,
+        providerRequestId: null,
+        extra: true,
+      }),
+      "utf8",
+    );
+    const unknown = await readExecutionMetadataFile(unknownKeyPath);
+    expect(unknown.metadata).toEqual(emptyMetadata);
+    expect(unknown.exists).toBe(true);
+    expect(unknown.error).toMatch(/invalid/i);
+
+    const oversizedPath = join(root, "oversized.json");
+    await writeFile(
+      oversizedPath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        observedHarnessVersion: null,
+        observedModelVersion: null,
+        providerRequestId: "x",
+      })}${" ".repeat(DEFAULT_EXECUTION_METADATA_LIMIT_BYTES + 16)}`,
+      "utf8",
+    );
+    const oversized = await readExecutionMetadataFile(oversizedPath);
+    expect(oversized.metadata).toEqual(emptyMetadata);
+    expect(oversized.exists).toBe(true);
+    expect(oversized.error).toMatch(/exceed|limit/i);
+  });
+
+  it("reports a bounded error for a symlinked metadata file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "local-maxima-exec-meta-symlink-"));
+    const targetPath = join(root, "real.json");
+    const linkPath = join(root, "execution-metadata.json");
+    await writeFile(
+      targetPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        observedHarnessVersion: "harness-1",
+        observedModelVersion: "model-1",
+        providerRequestId: "request-1",
+      }),
+      "utf8",
+    );
+    await symlink(targetPath, linkPath);
+
+    const result = await readExecutionMetadataFile(linkPath);
+
+    expect(result.metadata).toEqual(emptyMetadata);
+    expect(result.exists).toBe(true);
+    expect(result.error).toMatch(/regular file/i);
+    expect((await lstat(linkPath)).isSymbolicLink()).toBe(true);
+  });
+});
 
 describe("bounded private output", () => {
   it("redacts a secret prefix at a truncation boundary and keeps the final log within its byte cap", async () => {

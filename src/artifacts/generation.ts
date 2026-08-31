@@ -570,8 +570,11 @@ async function copyContestantInputs(
       tokenLimitEnforced: false,
     },
     observedVersions: {
-      harness: contestant.harness.version ?? NOT_RECORDED_VERSION,
-      model: contestant.model.version,
+      // Phase 2 §6.7: nothing has executed yet, so the *observed* identity is
+      // explicitly unknown. The configured versions live only in
+      // `identity.json` and must never be copied here before execution.
+      harness: null,
+      model: null,
     },
     stdoutLog: `logs/contestant-${anonymousCandidateId}.stdout.log`,
     stderrLog: `logs/contestant-${anonymousCandidateId}.stderr.log`,

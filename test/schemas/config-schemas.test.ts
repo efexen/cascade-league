@@ -239,6 +239,120 @@ describe("configuration schemas", () => {
     expect(() => ContestantsConfigSchema.parse(config)).toThrow();
   });
 
+  it("accepts the execution metadata output placeholder as a complete contestant argv value", () => {
+    expect(() =>
+      ContestantsConfigSchema.parse({
+        schemaVersion: 1,
+        defaults: {
+          timeoutMs: 480000,
+          maximumTotalTokens: 30000,
+          maximumSubmissionBytes: 61440,
+          concurrency: 4,
+        },
+        contestants: [
+          {
+            ...contestant,
+            harness: {
+              ...commandHarness,
+              command: {
+                ...commandHarness.command,
+                argv: [
+                  "/usr/bin/env",
+                  "node",
+                  "{promptPath}",
+                  "{submissionPath}",
+                  "{usageOutputPath}",
+                  "{executionMetadataOutputPath}",
+                ],
+              },
+            },
+          },
+          { ...contestant, id: "second-contestant" },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it("accepts the execution metadata output placeholder as a complete judge argv value", () => {
+    expect(() =>
+      JudgesConfigSchema.parse({
+        schemaVersion: 1,
+        defaults: {
+          timeoutMs: 180000,
+          maximumOutputTokens: 4000,
+          concurrencyPerJudge: 2,
+        },
+        judges: [
+          {
+            ...judge,
+            harness: {
+              ...judge.harness,
+              command: {
+                ...judge.harness.command,
+                argv: [...judge.harness.command.argv, "{executionMetadataOutputPath}"],
+              },
+            },
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects embedded or partial execution metadata templating", () => {
+    for (const embedded of [
+      "--metadata={executionMetadataOutputPath}",
+      "{executionMetadataOutputPath}.json",
+      "{executionMetadataOutputPath}{submissionPath}",
+    ]) {
+      expect(() =>
+        ContestantsConfigSchema.parse({
+          schemaVersion: 1,
+          defaults: {
+            timeoutMs: 480000,
+            maximumTotalTokens: 30000,
+            maximumSubmissionBytes: 61440,
+            concurrency: 4,
+          },
+          contestants: [
+            {
+              ...contestant,
+              harness: {
+                ...commandHarness,
+                command: {
+                  ...commandHarness.command,
+                  argv: ["/usr/bin/env", embedded],
+                },
+              },
+            },
+            { ...contestant, id: "second-contestant" },
+          ],
+        }),
+      ).toThrow(/placeholder/i);
+    }
+    expect(() =>
+      JudgesConfigSchema.parse({
+        schemaVersion: 1,
+        defaults: {
+          timeoutMs: 180000,
+          maximumOutputTokens: 4000,
+          concurrencyPerJudge: 2,
+        },
+        judges: [
+          {
+            ...judge,
+            harness: {
+              ...judge.harness,
+              command: {
+                ...judge.harness.command,
+                argv: ["/usr/bin/env", "--metadata={executionMetadataOutputPath}"],
+              },
+            },
+          },
+        ],
+      }),
+    ).toThrow(/placeholder/i);
+  });
+
   it("requires absolute executables and complete known placeholders", () => {
     expect(() =>
       ContestantsConfigSchema.parse({

@@ -241,8 +241,13 @@ export const RunSchema = StrictObject({
   configuredBudget: ConfiguredBudgetSchema,
   usage: UsageSchema,
   observedVersions: StrictObject({
-    harness: Text(200),
-    model: Text(200),
+    // Phase 2 §6.7: these are *observed* values reported by the harness
+    // wrapper's private execution metadata. They are deliberately separate
+    // from the configured identity in `identity.json` and stay `null` when
+    // the wrapper produced no (or no complete) metadata. Archived Phase 1
+    // artifacts carry non-null strings and continue to parse.
+    harness: Text(200).nullable(),
+    model: Text(200).nullable(),
   }),
   stdoutLog: RelativePosixPathSchema,
   stderrLog: RelativePosixPathSchema,

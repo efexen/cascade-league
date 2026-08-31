@@ -36,6 +36,7 @@ export const ContestantCommandPlaceholders = [
   "{promptPath}",
   "{submissionPath}",
   "{usageOutputPath}",
+  "{executionMetadataOutputPath}",
 ] as const;
 
 export const JudgeCommandPlaceholders = [
@@ -48,6 +49,7 @@ export const JudgeCommandPlaceholders = [
   "{usageOutputPath}",
   "{judgmentSummaryPath}",
   "{awardsPath}",
+  "{executionMetadataOutputPath}",
 ] as const;
 
 function commandSchema(allowedPlaceholders: readonly string[]) {

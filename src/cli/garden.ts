@@ -11,6 +11,7 @@ import { buildGallery } from "../gallery/index.js";
 import { runGeneration } from "../orchestration/generation.js";
 import { runWaveB } from "../orchestration/wave-b.js";
 import { startLoopbackStaticServer } from "../rendering/index.js";
+import { summarizeGeneration } from "../summarize/index.js";
 import { formatRunPlan, planGeneration } from "./planning.js";
 import {
   normalizeGenerationId,
@@ -61,6 +62,16 @@ function existingGenerationPath(options: GenerationLocationOptions): string {
 
 function progress(): (message: string) => void {
   return (message) => console.log(message);
+}
+
+/** One readable line, whitespace-collapsed and truncated, for operator stderr. */
+function boundedErrorMessage(error: unknown, maximumCharacters = 600): string {
+  const message = (error instanceof Error ? error.message : String(error))
+    .replace(/\s+/gu, " ")
+    .trim();
+  return message.length <= maximumCharacters
+    ? message
+    : `${message.slice(0, maximumCharacters - 1)}…`;
 }
 
 program.name("garden").description("Local Maxima generation tools").version("0.1.0");
@@ -223,6 +234,7 @@ program
       });
       console.log(`[${result.generationId}] generation: ${result.generationPath}`);
       console.log(`[${result.generationId}] gallery: ${result.gallery.publicPath}`);
+      console.log(`[${result.generationId}] run-summary: ${result.runSummaryPath}`);
     },
   );
 
@@ -250,6 +262,7 @@ program
       });
       console.log(`[${result.generationId}] generation: ${result.generationPath}`);
       console.log(`[${result.generationId}] gallery: ${result.gallery.publicPath}`);
+      console.log(`[${result.generationId}] run-summary: ${result.runSummaryPath}`);
     },
   );
 
@@ -266,6 +279,32 @@ program
       generationPath,
     });
     console.log(`gallery: ${result.publicPath}`);
+  });
+
+program
+  .command("summarize-generation")
+  .description(
+    "Regenerate the private run-summary.json from copied artifacts (no model calls)",
+  )
+  .option("--generation <generation>", "existing four-digit generation ID")
+  .option("--generation-path <path>", "existing generation directory")
+  .option("--generations-root <path>", "root directory for an existing generation")
+  .action(async (options: GenerationLocationOptions) => {
+    let generationPath: string;
+    try {
+      generationPath = existingGenerationPath(options);
+    } catch (error) {
+      console.error(`summarize-generation failed: ${boundedErrorMessage(error)}`);
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      const summaryPath = await summarizeGeneration(generationPath);
+      console.log(`run-summary: ${summaryPath}`);
+    } catch (error) {
+      console.error(`summarize-generation failed: ${boundedErrorMessage(error)}`);
+      process.exitCode = 1;
+    }
   });
 
 program
@@ -320,6 +359,7 @@ program
     });
     console.log(`generation: ${result.generationPath}`);
     console.log(`gallery: ${result.gallery.publicPath}`);
+    console.log(`run-summary: ${result.runSummaryPath}`);
   });
 
 program

@@ -5,6 +5,7 @@ import type {
   JudgeConfig,
 } from "../schemas/index.js";
 import type { ContestantRunUsage } from "../contestants/types.js";
+import type { ExecutionMetadata } from "../contestants/support.js";
 
 export interface JudgeMeasuredUsage {
   readonly inputTokens: number | null;
@@ -26,6 +27,7 @@ export interface JudgeCandidateInput {
   readonly judgmentPath: string;
   readonly rawOutputPath: string;
   readonly usageOutputPath: string;
+  readonly executionMetadataOutputPath: string;
   readonly stdoutLogPath: string;
   readonly stderrLogPath: string;
   readonly timeoutMs: number;
@@ -41,6 +43,8 @@ export interface JudgeCandidateResult {
   readonly error: string | null;
   readonly timedOut: boolean;
   readonly attemptCount: 1;
+  readonly executionMetadata: ExecutionMetadata;
+  readonly metadataProduced: boolean;
 }
 
 export interface JudgeAwardsCandidate {
@@ -59,6 +63,7 @@ export interface JudgeAwardsInput {
   readonly judgmentSummaryPath: string;
   readonly awardsPath: string;
   readonly usageOutputPath: string;
+  readonly executionMetadataOutputPath: string;
   readonly rawOutputPath: string;
   readonly stdoutLogPath: string;
   readonly stderrLogPath: string;
@@ -75,6 +80,8 @@ export interface JudgeAwardsResult {
   readonly error: string | null;
   readonly timedOut: boolean;
   readonly attemptCount: 1;
+  readonly executionMetadata: ExecutionMetadata;
+  readonly metadataProduced: boolean;
 }
 
 export interface JudgeAdapter {

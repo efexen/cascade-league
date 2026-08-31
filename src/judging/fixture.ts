@@ -7,10 +7,13 @@ import {
   type JudgmentScores,
 } from "../schemas/index.js";
 import {
+  emptyExecutionMetadata,
   emptyUsage,
+  readExecutionMetadataFile,
   regularFileExists,
   writeLog,
   writeTextAtomically,
+  type ExecutionMetadata,
 } from "../contestants/support.js";
 import type {
   JudgeAdapter,
@@ -182,6 +185,30 @@ function measuredModelUsage() {
   };
 }
 
+// Deterministic, offline execution metadata written by the fixture judge
+// wrapper for both operations so the fixture tournament exercises metadata
+// reading, private archival, and leakage checks end to end. No randomness,
+// no clock, no fabricated usage, and no real provider identifiers.
+function fixtureJudgeMetadata(judgeId: string, operation: string): ExecutionMetadata {
+  return {
+    observedHarnessVersion: "fixture-judge-harness-1.0.0",
+    observedModelVersion: "fixture-judge-model-1.0.0",
+    providerRequestId: `fixture-request-judge-${judgeId}-${operation}`,
+  };
+}
+
+async function writeFixtureJudgeMetadata(
+  outputPath: string,
+  metadata: ExecutionMetadata,
+): Promise<ExecutionMetadata> {
+  await writeTextAtomically(
+    outputPath,
+    `${JSON.stringify({ schemaVersion: 1, ...metadata })}\n`,
+  );
+  const readBack = await readExecutionMetadataFile(outputPath);
+  return readBack.error === null ? readBack.metadata : emptyExecutionMetadata();
+}
+
 const delay = (milliseconds: number): Promise<void> =>
   new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 
@@ -197,6 +224,10 @@ export class FixtureJudgeAdapter implements JudgeAdapter {
   ): Promise<JudgeCandidateResult> {
     const fixture = fixtureName(input.judge);
     const currentOutcome = outcome(fixture);
+    const executionMetadata = await writeFixtureJudgeMetadata(
+      input.executionMetadataOutputPath,
+      fixtureJudgeMetadata(input.judgeId, input.anonymousCandidateId),
+    );
     if (currentOutcome === "timeout") {
       await delay(input.timeoutMs + 1);
       return {
@@ -208,6 +239,8 @@ export class FixtureJudgeAdapter implements JudgeAdapter {
         error: "fixture judge timed out",
         timedOut: true,
         attemptCount: 1,
+        executionMetadata,
+        metadataProduced: true,
       };
     }
     await delay(this.delayMs);
@@ -221,6 +254,8 @@ export class FixtureJudgeAdapter implements JudgeAdapter {
         error: "fixture judge failed",
         timedOut: false,
         attemptCount: 1,
+        executionMetadata,
+        metadataProduced: true,
       };
     }
     if (currentOutcome === "invalid") {
@@ -237,6 +272,8 @@ export class FixtureJudgeAdapter implements JudgeAdapter {
         error: "fixture judge returned invalid JSON",
         timedOut: false,
         attemptCount: 1,
+        executionMetadata,
+        metadataProduced: true,
       };
     }
 
@@ -277,12 +314,18 @@ export class FixtureJudgeAdapter implements JudgeAdapter {
       error: null,
       timedOut: false,
       attemptCount: 1,
+      executionMetadata,
+      metadataProduced: true,
     };
   }
 
   public async createAwards(input: JudgeAwardsInput): Promise<JudgeAwardsResult> {
     const fixture = fixtureName(input.judge);
     const currentOutcome = outcome(fixture);
+    const executionMetadata = await writeFixtureJudgeMetadata(
+      input.executionMetadataOutputPath,
+      fixtureJudgeMetadata(input.judgeId, "awards"),
+    );
     if (currentOutcome === "timeout") {
       await delay(input.timeoutMs + 1);
       return {
@@ -293,6 +336,8 @@ export class FixtureJudgeAdapter implements JudgeAdapter {
         error: "fixture awards judge timed out",
         timedOut: true,
         attemptCount: 1,
+        executionMetadata,
+        metadataProduced: true,
       };
     }
     await delay(this.delayMs);
@@ -305,6 +350,8 @@ export class FixtureJudgeAdapter implements JudgeAdapter {
         error: "fixture awards judge failed",
         timedOut: false,
         attemptCount: 1,
+        executionMetadata,
+        metadataProduced: true,
       };
     }
     if (currentOutcome === "invalid") {
@@ -318,6 +365,8 @@ export class FixtureJudgeAdapter implements JudgeAdapter {
         error: "fixture awards returned invalid JSON",
         timedOut: false,
         attemptCount: 1,
+        executionMetadata,
+        metadataProduced: true,
       };
     }
     const validCandidates = input.candidates.filter(
@@ -358,6 +407,8 @@ export class FixtureJudgeAdapter implements JudgeAdapter {
       error: null,
       timedOut: false,
       attemptCount: 1,
+      executionMetadata,
+      metadataProduced: true,
     };
   }
 }

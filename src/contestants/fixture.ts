@@ -7,11 +7,14 @@ import type {
   ContestantRunResult,
 } from "./types.js";
 import {
+  emptyExecutionMetadata,
   emptyUsage,
-  NOT_RECORDED_VERSION,
+  readExecutionMetadataFile,
   regularFileExists,
   resultWithError,
   writeLog,
+  writeTextAtomically,
+  type ExecutionMetadata,
 } from "./support.js";
 
 export interface FixtureContestantAdapterOptions {
@@ -46,6 +49,40 @@ function fixturePath(root: string, fixture: string): string {
   return path;
 }
 
+// Deterministic, offline execution metadata written by the fixture wrapper so
+// the fixture tournament exercises metadata reading, archival, observed-version
+// recording, summary completeness, and public-leakage checks end to end. It is
+// fully deterministic: no randomness, no clock, and no fabricated usage.
+function fixtureExecutionMetadata(contestantId: string): ExecutionMetadata {
+  return {
+    observedHarnessVersion: "fixture-harness-1.0.0",
+    observedModelVersion: "fixture-model-1.0.0",
+    providerRequestId: `fixture-request-contestant-${contestantId}`,
+  };
+}
+
+async function writeFixtureMetadata(
+  input: ContestantRunInput,
+): Promise<ExecutionMetadata> {
+  const metadata = fixtureExecutionMetadata(input.contestantId);
+  await writeTextAtomically(
+    input.executionMetadataOutputPath,
+    `${JSON.stringify({ schemaVersion: 1, ...metadata })}\n`,
+  );
+  const readBack = await readExecutionMetadataFile(input.executionMetadataOutputPath);
+  return readBack.error === null ? readBack.metadata : emptyExecutionMetadata();
+}
+
+function observedVersionsOf(metadata: ExecutionMetadata): {
+  readonly harness: string | null;
+  readonly model: string | null;
+} {
+  return {
+    harness: metadata.observedHarnessVersion,
+    model: metadata.observedModelVersion,
+  };
+}
+
 const delay = (milliseconds: number): Promise<void> =>
   new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 
@@ -66,6 +103,8 @@ export class FixtureContestantAdapter implements ContestantAdapter {
     const outcome = fixtureOutcome(fixture);
     const signals: ("SIGTERM" | "SIGKILL")[] = [];
     await mkdir(input.workspacePath, { recursive: true });
+    const executionMetadata = await writeFixtureMetadata(input);
+    const observedVersions = observedVersionsOf(executionMetadata);
 
     if (outcome === "timeout") {
       await delay(input.timeoutMs + 1);
@@ -78,10 +117,9 @@ export class FixtureContestantAdapter implements ContestantAdapter {
         timedOut: true,
         attemptCount: 1,
         usage: emptyUsage(false),
-        observedVersions: {
-          harness: input.contestant.harness.version ?? NOT_RECORDED_VERSION,
-          model: input.contestant.model.version,
-        },
+        observedVersions,
+        executionMetadata,
+        metadataProduced: true,
         error: "fixture contestant timed out",
         submissionProduced: false,
         usageProduced: false,
@@ -103,10 +141,9 @@ export class FixtureContestantAdapter implements ContestantAdapter {
         timedOut: false,
         attemptCount: 1,
         usage: emptyUsage(false),
-        observedVersions: {
-          harness: input.contestant.harness.version ?? NOT_RECORDED_VERSION,
-          model: input.contestant.model.version,
-        },
+        observedVersions,
+        executionMetadata,
+        metadataProduced: true,
         error: "fixture contestant failed",
         submissionProduced: false,
         usageProduced: false,
@@ -137,10 +174,9 @@ export class FixtureContestantAdapter implements ContestantAdapter {
           timedOut: false,
           attemptCount: 1,
           usage: emptyUsage(false),
-          observedVersions: {
-            harness: input.contestant.harness.version ?? NOT_RECORDED_VERSION,
-            model: input.contestant.model.version,
-          },
+          observedVersions,
+          executionMetadata,
+          metadataProduced: true,
           submissionProduced,
           usageProduced: false,
           terminationSignals: signals,
@@ -154,10 +190,9 @@ export class FixtureContestantAdapter implements ContestantAdapter {
       timedOut: false,
       attemptCount: 1,
       usage: emptyUsage(false),
-      observedVersions: {
-        harness: input.contestant.harness.version ?? NOT_RECORDED_VERSION,
-        model: input.contestant.model.version,
-      },
+      observedVersions,
+      executionMetadata,
+      metadataProduced: true,
       error: submissionProduced
         ? null
         : "fixture contestant produced no submission.css",

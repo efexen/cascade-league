@@ -131,7 +131,8 @@ or executable paths. The grant is not persisted: a `resume-generation` that
 still has pending command tasks must pass `--allow-model-calls` again, while a
 resume whose command tasks are all terminal (for example, finishing scoring and
 the gallery) proceeds without it. `create-generation`, `verify`,
-`plan-generation`, `build-gallery`, and `serve-gallery` never require it, and
+`plan-generation`, `build-gallery`, `serve-gallery`, and `summarize-generation`
+never require it and never make a model call themselves, and
 `fixture-tournament` is fixture-only.
 
 A command contestant whose `execution.oneShotEnforcement` is `prompt_only` is
@@ -149,7 +150,8 @@ pnpm garden fixture-tournament
 
 The command creates a collision-safe temporary output root, runs three fixture
 contestants and two deterministic fixture judges, and prints the absolute
-generation and gallery paths. To choose the output location explicitly:
+generation, gallery, and private `run-summary.json` paths. To choose the
+output location explicitly:
 
 ```sh
 pnpm garden fixture-tournament --output-root /tmp/local-maxima-fixture-run
@@ -167,6 +169,8 @@ pnpm garden run-generation --generation 0001 --generations-root /tmp/local-maxim
 pnpm garden resume-generation --generation 0001 --generations-root /tmp/local-maxima-runs
 pnpm garden build-gallery --generation 0001 --generations-root /tmp/local-maxima-runs
 pnpm garden serve-gallery --generation 0001 --generations-root /tmp/local-maxima-runs
+pnpm garden summarize-generation --generation 0001 --generations-root /tmp/local-maxima-runs
+pnpm garden summarize-generation --generation-path /tmp/local-maxima-runs/0001
 ```
 
 `--profile` is required whenever a command creates a new generation
@@ -185,9 +189,65 @@ outcomes. Only generation-level integrity or setup failures make the command
 nonzero.
 
 Completed generations are immutable. `run-generation` and `resume-generation`
-refuse them. `build-gallery` is the narrow read-only exception: it may rebuild
-only derived `public/` output from a completed/scored generation. The local
-server binds to loopback; stop it with Ctrl-C.
+refuse them. `build-gallery` is the narrow read-only exception for public
+output: it may rebuild only derived `public/` bytes from a completed/scored
+generation. `summarize-generation` is the corresponding private exception: it
+may rebuild only the derived `run-summary.json`. The local server binds to
+loopback; stop it with Ctrl-C.
+
+## Run summary (`run-summary.json`)
+
+Normal completion writes a private `run-summary.json` at the generation root
+automatically: a successful `run-generation`, `resume-generation`, or
+`fixture-tournament` ends with the summary present and prints its absolute
+path. `summarize-generation` regenerates it later from the generation's copied
+artifacts alone, for both location forms shown above. It requires no
+`--profile` and no `--allow-model-calls`, never invokes a contestant or judge
+adapter, and never executes a model command. Because the summary timestamp
+comes from the durable `manifest.completedAt`, regeneration over unchanged
+artifacts reproduces byte-identical output; integrity, identity, or generation
+mismatches in the copied artifacts make the command exit nonzero with a single
+bounded error line and leave the previous summary untouched.
+
+Contents (all derived from durable generation artifacts, never from the live
+repository profile): per-contestant duration, reported usage/cost, observed
+version completeness, and one-shot enforcement mode; per-judge candidate and
+awards call durations, usage, and cost; per-role planned/started/succeeded/
+failed/timeout/missing-submission/invalid/uncertain task counts; wall-clock
+start/completion/elapsed; aggregate token/cost totals; the configured maximum
+call count from the durable `run-plan.json`; and per-resource-group configured
+limits versus observed start counts, maximum concurrency, and minimum start
+interval.
+
+Known zero versus unknown: a `0` means a value was reported as zero; `null`
+means no durable evidence exists, and `null` task counts mean no task-state
+artifact for that role at all (for example archived Phase 1 generations, which
+also report `null` plan-derived fields). Aggregate totals always carry a
+`completeness` label: `"complete"` only when every relevant call reported the
+value, `"partial"` when at least one relevant call was unknown (the summed
+known parts still appear). `totals.callsWithUnknownUsage` and
+`callsWithUnknownCost` count exactly how many attempted calls lacked those
+fields.
+
+Execution metadata and identity separation: each command or fixture call may
+write a private `execution-metadata.json` beside its usage output. The
+orchestrator archives accepted copies at
+`contestants/<id>/execution-metadata.json` and
+`judging/<judge>/execution-metadata/<candidate>.json` (plus
+`awards.json`). These record what the harness _observed_ at run time
+(`observedHarnessVersion`, `observedModelVersion`) plus a private
+`providerRequestId`. Observed versions are deliberately separate from the
+_configured_ identity stored in `identity.json`: `run.json#observedVersions`
+and the summary's `versionCompleteness` derive only from observed metadata,
+so a configured version is never reported as something that actually ran.
+Missing, oversized, or invalid metadata keeps the observed identity unknown
+without changing any terminal task status.
+
+Privacy: provider request IDs, detailed usage, estimated costs, command
+paths, prompts, environment variable names, credentials, logs, and judge
+costs remain private. The summary itself is private, and neither it nor any
+execution-metadata file is ever copied into `public/`; public output carries
+only the existing allowlisted gallery bytes.
 
 ## Real command adapters
 
@@ -199,7 +259,7 @@ Contestant placeholders:
 
 ```text
 {workspacePath} {challengePath} {starterCssPath} {promptPath}
-{submissionPath} {usageOutputPath}
+{submissionPath} {usageOutputPath} {executionMetadataOutputPath}
 ```
 
 Judge placeholders:
@@ -207,7 +267,7 @@ Judge placeholders:
 ```text
 {workspacePath} {promptPath} {candidateScreenshotPath} {contactSheetPath}
 {sanitisedCssPath} {judgmentPath} {usageOutputPath}
-{judgmentSummaryPath} {awardsPath}
+{judgmentSummaryPath} {awardsPath} {executionMetadataOutputPath}
 ```
 
 For example, a command harness entry has `adapter: command`, an absolute
@@ -216,16 +276,22 @@ environment variable names. Configure real harnesses in
 `config/profiles/real.local/` (copied from the checked-in `real.example`
 template). Keep provider credentials out of YAML. The
 adapter copies only allowlisted variables into the child process and redacts
-those values in private stdout/stderr logs. Never put a secret, prompt, raw
+those values in private stdout/stderr logs. A wrapper may additionally write a
+strict, bounded `execution-metadata.json` at `{executionMetadataOutputPath}`
+recording the observed harness/model versions and a private provider request
+ID; it is archived privately under the generation and never published. Never
+put a secret, prompt, raw
 model response, or usage/cost value in a public template or public metadata.
 
 ## Artifacts and inspection
 
 Each generation contains immutable snapshots under `config/` and `challenge/`,
 a private `run-plan.json`, per-contestant `identity.json`, `run.json`,
-`validation.json`, sanitised CSS and screenshots, anonymous judge artifacts
-under `judging/`, private logs under `logs/`, and derived `leaderboard.json`
-and `public/` output. The anonymous map, raw judge output, prompts, workspaces,
+`validation.json`, and optional private `execution-metadata.json`, sanitised
+CSS and screenshots, anonymous judge artifacts
+under `judging/`, private logs under `logs/`, derived `leaderboard.json` and
+`public/` output, and the derived private `run-summary.json`. The anonymous
+map, raw judge output, prompts, workspaces,
 usage, logs, and competitor CSS remain private. Public output contains only
 `index.html`, `metadata.json`, `champion.css`, neutral filenames for
 screenshots, local fonts, and `gallery-screenshot.png`.
@@ -235,6 +301,7 @@ Useful checks:
 ```sh
 cat /absolute/path/to/generation/manifest.json
 cat /absolute/path/to/generation/run-plan.json
+cat /absolute/path/to/generation/run-summary.json
 cat /absolute/path/to/generation/leaderboard.json
 find /absolute/path/to/generation/public -type f -print
 open /absolute/path/to/generation/public/index.html

@@ -84,9 +84,10 @@ import {
 import {
   regularFileExists,
   DEFAULT_USAGE_LIMIT_BYTES,
+  emptyExecutionMetadata,
+  readExecutionMetadataFile,
   readRegularFileAtMost,
   writeTextAtomically,
-  NOT_RECORDED_VERSION,
 } from "../contestants/support.js";
 import { ResourceAwareScheduler, type SchedulerTime } from "./resource-scheduler.js";
 
@@ -1254,10 +1255,7 @@ async function ensureContestantPrompt(
   return prompt;
 }
 
-function adapterFailureResult(
-  contestant: ContestantConfig,
-  error: unknown,
-): ContestantRunResult {
+function adapterFailureResult(error: unknown): ContestantRunResult {
   return {
     status: "failed",
     exitCode: null,
@@ -1271,10 +1269,12 @@ function adapterFailureResult(
       estimatedCostUsd: null,
       tokenLimitEnforced: false,
     },
-    observedVersions: {
-      harness: contestant.harness.version ?? NOT_RECORDED_VERSION,
-      model: contestant.model.version,
-    },
+    // Nothing was observed when the adapter never produced a result, so the
+    // observed identity stays explicitly unknown instead of reusing the
+    // configured identity. The configured identity remains in identity.json.
+    observedVersions: { harness: null, model: null },
+    executionMetadata: emptyExecutionMetadata(),
+    metadataProduced: false,
     error: boundedError(error),
     submissionProduced: false,
     usageProduced: false,
@@ -1349,7 +1349,6 @@ async function runOneContestant(
   let integrityError: string | null = null;
   let prompt: string | null = null;
   let runResult: ContestantRunResult = adapterFailureResult(
-    input.contestant,
     "contestant execution did not start",
   );
   try {
@@ -1372,13 +1371,14 @@ async function runOneContestant(
           promptPath: join(workspacePath, "prompt.md"),
           submissionPath: join(workspacePath, "submission.css"),
           usageOutputPath: join(workspacePath, "usage.json"),
+          executionMetadataOutputPath: join(workspacePath, "execution-metadata.json"),
           stdoutLogPath: join(input.generationPath, running.stdoutLog),
           stderrLogPath: join(input.generationPath, running.stderrLog),
           timeoutMs: budget.timeoutMs,
           maximumTotalTokens: budget.maximumTotalTokens,
         });
       } catch (error) {
-        runResult = adapterFailureResult(input.contestant, error);
+        runResult = adapterFailureResult(error);
       }
       const postAttemptErrors: string[] = [];
       try {
@@ -1399,7 +1399,7 @@ async function runOneContestant(
       if (postAttemptErrors.length > 0) integrityError = postAttemptErrors.join("; ");
     }
     if (integrityError !== null) {
-      runResult = adapterFailureResult(input.contestant, integrityError);
+      runResult = adapterFailureResult(integrityError);
     }
     const completed = input.clock();
     const completedAt = timestamp(completed);
@@ -1434,6 +1434,18 @@ async function runOneContestant(
               error: `${runResult.error ?? "contestant output collection failed"}; usage metadata could not be collected`,
             };
           }
+        }
+        // Phase 2 §6.7: the optional private execution-metadata file is
+        // archived only when a bounded strict read accepts it. Missing,
+        // invalid, and oversized metadata stay explicitly incomplete: no
+        // durable copy, no retry, and no change to the terminal status.
+        const executionMetadataPath = join(workspacePath, "execution-metadata.json");
+        const metadataRead = await readExecutionMetadataFile(executionMetadataPath);
+        if (metadataRead.exists && metadataRead.error === null) {
+          await writeTextAtomically(
+            join(contestantPath, "execution-metadata.json"),
+            `${JSON.stringify({ schemaVersion: 1, ...metadataRead.metadata })}\n`,
+          );
         }
       } catch (error) {
         runResult = {
@@ -2075,6 +2087,8 @@ async function judgeOne(
       error: boundedError(error),
       timedOut: false,
       attemptCount: 1,
+      executionMetadata: emptyExecutionMetadata(),
+      metadataProduced: false,
     };
   }
 }
@@ -2093,6 +2107,8 @@ function makeJudgeAdapterFailure(error: unknown): JudgeAwardsResult {
     error: boundedError(error),
     timedOut: false,
     attemptCount: 1,
+    executionMetadata: emptyExecutionMetadata(),
+    metadataProduced: false,
   };
 }
 
@@ -2125,6 +2141,8 @@ function awardsResultFromTask(state: TaskState): JudgeAwardsResult {
     error: state.error ?? `awards task ended with status ${state.status}`,
     timedOut: status === "timeout",
     attemptCount: 1,
+    executionMetadata: emptyExecutionMetadata(),
+    metadataProduced: false,
   };
 }
 
@@ -2143,6 +2161,8 @@ function makeJudgeCandidateFailure(error: unknown): JudgeCandidateResult {
     error: boundedError(error),
     timedOut: false,
     attemptCount: 1,
+    executionMetadata: emptyExecutionMetadata(),
+    metadataProduced: false,
   };
 }
 
@@ -2176,6 +2196,8 @@ function judgeResultFromTask(state: TaskState): JudgeCandidateResult {
     error: state.error ?? `judge task ended with status ${state.status}`,
     timedOut: status === "timeout",
     attemptCount: 1,
+    executionMetadata: emptyExecutionMetadata(),
+    metadataProduced: false,
   };
 }
 
@@ -2629,6 +2651,8 @@ async function runOneJudge(input: {
                 error: null,
                 timedOut: false,
                 attemptCount: 1,
+                executionMetadata: emptyExecutionMetadata(),
+                metadataProduced: false,
               },
               durablePath,
               startedAt: candidateTask.startedAt ?? taskStartedAt,
@@ -2741,6 +2765,10 @@ async function runOneJudge(input: {
             judgmentPath: join(candidateWorkspace, "judgment.json"),
             rawOutputPath,
             usageOutputPath: join(candidateWorkspace, "usage.json"),
+            executionMetadataOutputPath: join(
+              candidateWorkspace,
+              "execution-metadata.json",
+            ),
             stdoutLogPath: join(
               input.generationPath,
               "logs",
@@ -2788,6 +2816,19 @@ async function runOneJudge(input: {
             if (!usageCopied) {
               throw new Error("candidate usage metadata could not be archived");
             }
+          }
+          // Phase 2 §6.7: the judge's optional private execution-metadata file
+          // is bounded here and archived only when a strict read accepts it.
+          // Missing, invalid, and oversized metadata produce no durable copy,
+          // no retry, and no change to the terminal assessment status.
+          const candidateMetadata = await readExecutionMetadataFile(
+            join(candidateWorkspace, "execution-metadata.json"),
+          );
+          if (candidateMetadata.exists && candidateMetadata.error === null) {
+            await writeTextAtomically(
+              join(judgePath, "execution-metadata", `${anonymousCandidateId}.json`),
+              `${JSON.stringify({ schemaVersion: 1, ...candidateMetadata.metadata })}\n`,
+            );
           }
         } catch (error) {
           if (durablePath !== null) {
@@ -2934,6 +2975,8 @@ async function runOneJudge(input: {
           error: null,
           timedOut: false,
           attemptCount: 1,
+          executionMetadata: emptyExecutionMetadata(),
+          metadataProduced: false,
         };
         const startedAt = awardsTask.startedAt ?? timestamp(input.clock());
         const completedAt = awardsTask.completedAt ?? startedAt;
@@ -3010,6 +3053,7 @@ async function runOneJudge(input: {
           judgmentSummaryPath: join(awardsWorkspace, "judgment-summary.json"),
           awardsPath: join(awardsWorkspace, "awards.json"),
           usageOutputPath: join(awardsWorkspace, "usage.json"),
+          executionMetadataOutputPath: join(awardsWorkspace, "execution-metadata.json"),
           rawOutputPath: awardsRawPath,
           stdoutLogPath: join(
             input.generationPath,
@@ -3062,6 +3106,18 @@ async function runOneJudge(input: {
           if (!usageCopied) {
             throw new Error("awards usage metadata could not be archived");
           }
+        }
+        // Awards mirror the candidate metadata boundary: bounded first, and
+        // only a complete valid file is archived privately. Missing, invalid,
+        // or oversized metadata yields no durable copy and no status change.
+        const awardsMetadata = await readExecutionMetadataFile(
+          join(awardsWorkspace, "execution-metadata.json"),
+        );
+        if (awardsMetadata.exists && awardsMetadata.error === null) {
+          await writeTextAtomically(
+            join(judgePath, "execution-metadata", "awards.json"),
+            `${JSON.stringify({ schemaVersion: 1, ...awardsMetadata.metadata })}\n`,
+          );
         }
       } catch (error) {
         awards = makeJudgeAdapterFailure(error);

@@ -17,9 +17,11 @@ import sharp from "sharp";
 import {
   AnonymousMapSchema,
   ContestantsConfigSchema,
+  IdentitySchema,
   LeaderboardSchema,
   ManifestSchema,
   RunPlanSchema,
+  RunSchema,
   SnapshotSchema,
   readYamlWithSchema,
 } from "../../src/schemas/index.js";
@@ -260,6 +262,41 @@ describe("immutable generation creation", () => {
     expect(
       await filesUnder(join(result.generationPath, "public")).catch(() => []),
     ).toEqual([]);
+  });
+
+  it("initializes pending run.json observed versions as unknown, never the configured identity", async () => {
+    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const result = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      generationId: "0001",
+      profileId: "fixture",
+      now: timestamp,
+    });
+    for (const contestantId of fixtureContestantIds) {
+      const run = RunSchema.parse(
+        JSON.parse(
+          await readFile(
+            join(result.generationPath, "contestants", contestantId, "run.json"),
+            "utf8",
+          ),
+        ) as unknown,
+      );
+      // Nothing has executed yet, so the *observed* identity is explicitly
+      // unknown. It must never be pre-filled from the configured identity.
+      expect(run.status).toBe("pending");
+      expect(run.observedVersions).toEqual({ harness: null, model: null });
+      // The configured versions remain only in the immutable identity.json.
+      const identityText = await readFile(
+        join(result.generationPath, "contestants", contestantId, "identity.json"),
+        "utf8",
+      );
+      const identity = IdentitySchema.parse(JSON.parse(identityText) as unknown);
+      expect(identity.harness.configuredVersion).toBe("1.0.0");
+      expect(identity.model.configuredVersion).toBe("1.0.0");
+      expect(identityText).not.toContain("observedVersions");
+    }
   });
 
   it("rejects unknown, symlinked, or traversal profile identifiers at creation", async () => {

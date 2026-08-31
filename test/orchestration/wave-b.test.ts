@@ -24,13 +24,19 @@ import {
 } from "../../src/contestants/index.js";
 import {
   buildAnonymousContactSheet,
+  CommandJudgeAdapter,
   FixtureJudgeAdapter,
 } from "../../src/judging/index.js";
 import { runWaveB } from "../../src/orchestration/wave-b.js";
 import {
+  ExecutionMetadataFileSchema,
+  emptyExecutionMetadata,
+} from "../../src/contestants/support.js";
+import {
   CandidateJudgmentSchema,
   ContactSheetOrderSchema,
   GenerationAwardsSchema,
+  IdentitySchema,
   JudgeAssessmentOrderSchema,
   JudgeSummarySchema,
   JudgeTaskTimingsSchema,
@@ -38,9 +44,41 @@ import {
   RunSchema,
   ValidationSchema,
 } from "../../src/schemas/index.js";
-import type { JudgeAdapter } from "../../src/judging/index.js";
+import type {
+  JudgeAdapter,
+  JudgeAwardsInput,
+  JudgeCandidateInput,
+} from "../../src/judging/index.js";
+import type { JudgeConfig } from "../../src/schemas/index.js";
 
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
+
+async function listFilesRecursive(root: string, prefix = ""): Promise<string[]> {
+  const entries = await readdir(prefix === "" ? root : join(root, prefix), {
+    withFileTypes: true,
+  });
+  const files: string[] = [];
+  for (const entry of entries.sort((left, right) =>
+    left.name.localeCompare(right.name),
+  )) {
+    const relativePath = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+    if (entry.isDirectory()) {
+      files.push(...(await listFilesRecursive(root, relativePath)));
+    } else if (entry.isFile()) {
+      files.push(relativePath);
+    }
+  }
+  return files;
+}
+
+async function filesContaining(root: string, needle: string): Promise<string[]> {
+  const matches: string[] = [];
+  for (const relativePath of await listFilesRecursive(root)) {
+    const content = await readFile(join(root, relativePath));
+    if (content.includes(needle)) matches.push(relativePath);
+  }
+  return matches;
+}
 
 describe("Wave-B fixture orchestration", () => {
   it("applies schema-v2 contestant groups with FIFO pacing and durable wait-free timings", async () => {
@@ -904,6 +942,829 @@ describe("Wave-B fixture orchestration", () => {
     ).rejects.toThrow();
   }, 30000);
 
+  it("archives valid contestant execution metadata privately and keeps configured identity separate", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-contestant-meta-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      profileId: "fixture",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    const scriptPath = join(generationsRoot, "meta-contestant.mjs");
+    const editorialCss = await readFile(
+      join(repositoryRoot, "test/fixtures/contestants/editorial.css"),
+      "utf8",
+    );
+    await writeFile(
+      scriptPath,
+      [
+        'import { writeFileSync } from "node:fs";',
+        `writeFileSync(process.argv[2], ${JSON.stringify(editorialCss)});`,
+        `writeFileSync(process.argv[3], ${JSON.stringify(
+          JSON.stringify({
+            schemaVersion: 1,
+            observedHarnessVersion: "observed-harness-9.9.9",
+            observedModelVersion: "observed-model-8.8.8",
+            providerRequestId: "req-contestant-private-42",
+          }),
+        )});`,
+      ].join("\n"),
+      "utf8",
+    );
+    const fixtureAdapter = new FixtureContestantAdapter({
+      fixtureRoot: join(repositoryRoot, "test/fixtures/contestants"),
+      delayMs: 1,
+    });
+    const commandAdapter = new CommandContestantAdapter();
+    const result = await runWaveB({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      contestantAdapterFactory: (contestant) => {
+        if (contestant.id !== "fixture-editorial") return fixtureAdapter;
+        return {
+          run: (input) =>
+            commandAdapter.run({
+              ...input,
+              contestant: {
+                ...contestant,
+                harness: {
+                  name: "command-fixture",
+                  version: "1.0.0",
+                  adapter: "command",
+                  command: {
+                    argv: [
+                      process.execPath,
+                      scriptPath,
+                      "{submissionPath}",
+                      "{executionMetadataOutputPath}",
+                    ],
+                    environmentAllowlist: [],
+                  },
+                },
+              },
+            }),
+        };
+      },
+    });
+
+    const metaContestant = result.contestants.find(
+      (contestant) => contestant.contestantId === "fixture-editorial",
+    )!;
+    expect(metaContestant.run.status).toBe("succeeded");
+    expect(metaContestant.run.observedVersions).toEqual({
+      harness: "observed-harness-9.9.9",
+      model: "observed-model-8.8.8",
+    });
+    const archived = ExecutionMetadataFileSchema.parse(
+      JSON.parse(
+        await readFile(join(metaContestant.path, "execution-metadata.json"), "utf8"),
+      ) as unknown,
+    );
+    expect(archived).toEqual({
+      schemaVersion: 1,
+      observedHarnessVersion: "observed-harness-9.9.9",
+      observedModelVersion: "observed-model-8.8.8",
+      providerRequestId: "req-contestant-private-42",
+    });
+    // The immutable identity keeps the *configured* identity, never the
+    // observed values reported by the wrapper.
+    const identityText = await readFile(
+      join(metaContestant.path, "identity.json"),
+      "utf8",
+    );
+    const identity = IdentitySchema.parse(JSON.parse(identityText) as unknown);
+    expect(identity.harness.configuredVersion).toBe("1.0.0");
+    expect(identity.model.configuredVersion).toBe("1.0.0");
+    expect(identityText).not.toContain("observed-harness-9.9.9");
+    expect(identityText).not.toContain("req-contestant-private-42");
+    // The provider request id is private-only: exactly one durable file.
+    expect(
+      await filesContaining(generation.generationPath, "req-contestant-private-42"),
+    ).toEqual(["contestants/fixture-editorial/execution-metadata.json"]);
+    // Fixture contestants exercise the same archival deterministically.
+    const fixtureContestant = result.contestants.find(
+      (contestant) => contestant.contestantId === "fixture-geometric",
+    )!;
+    expect(fixtureContestant.run.observedVersions).toEqual({
+      harness: "fixture-harness-1.0.0",
+      model: "fixture-model-1.0.0",
+    });
+    expect(
+      ExecutionMetadataFileSchema.parse(
+        JSON.parse(
+          await readFile(
+            join(fixtureContestant.path, "execution-metadata.json"),
+            "utf8",
+          ),
+        ) as unknown,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      observedHarnessVersion: "fixture-harness-1.0.0",
+      observedModelVersion: "fixture-model-1.0.0",
+      providerRequestId: "fixture-request-contestant-fixture-geometric",
+    });
+    expect(
+      (
+        await filesContaining(generation.generationPath, "fixture-request-contestant-")
+      ).sort(),
+    ).toEqual([
+      "contestants/fixture-generic/execution-metadata.json",
+      "contestants/fixture-geometric/execution-metadata.json",
+    ]);
+  }, 30000);
+
+  it("treats missing contestant execution metadata as allowed and explicitly incomplete", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-contestant-meta-missing-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      profileId: "fixture",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    const scriptPath = join(generationsRoot, "plain-meta-contestant.mjs");
+    const editorialCss = await readFile(
+      join(repositoryRoot, "test/fixtures/contestants/editorial.css"),
+      "utf8",
+    );
+    await writeFile(
+      scriptPath,
+      [
+        'import { writeFileSync } from "node:fs";',
+        `writeFileSync(process.argv[2], ${JSON.stringify(editorialCss)});`,
+      ].join("\n"),
+      "utf8",
+    );
+    const fixtureAdapter = new FixtureContestantAdapter({
+      fixtureRoot: join(repositoryRoot, "test/fixtures/contestants"),
+      delayMs: 1,
+    });
+    const commandAdapter = new CommandContestantAdapter();
+    const result = await runWaveB({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      contestantAdapterFactory: (contestant) => {
+        if (contestant.id !== "fixture-editorial") return fixtureAdapter;
+        return {
+          run: (input) =>
+            commandAdapter.run({
+              ...input,
+              contestant: {
+                ...contestant,
+                harness: {
+                  name: "command-fixture",
+                  version: "1.0.0",
+                  adapter: "command",
+                  command: {
+                    argv: [process.execPath, scriptPath, "{submissionPath}"],
+                    environmentAllowlist: [],
+                  },
+                },
+              },
+            }),
+        };
+      },
+    });
+
+    const plainContestant = result.contestants.find(
+      (contestant) => contestant.contestantId === "fixture-editorial",
+    )!;
+    expect(plainContestant.run.status).toBe("succeeded");
+    expect(plainContestant.run.attemptCount).toBe(1);
+    expect(plainContestant.run.error).toBeNull();
+    // Explicitly incomplete: observed identity stays null, never configured.
+    expect(plainContestant.run.observedVersions).toEqual({
+      harness: null,
+      model: null,
+    });
+    await expect(
+      readFile(join(plainContestant.path, "execution-metadata.json")),
+    ).rejects.toThrow();
+    expect(plainContestant.validation.status).toBe("valid");
+  }, 30000);
+
+  it("bounds invalid or oversized contestant metadata without archiving, retrying, or crashing", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-contestant-meta-bad-"),
+    );
+    const editorialCss = await readFile(
+      join(repositoryRoot, "test/fixtures/contestants/editorial.css"),
+      "utf8",
+    );
+    const invalidScriptPath = join(generationsRoot, "invalid-meta.mjs");
+    await writeFile(
+      invalidScriptPath,
+      [
+        'import { writeFileSync } from "node:fs";',
+        `writeFileSync(process.argv[2], ${JSON.stringify(editorialCss)});`,
+        'writeFileSync(process.argv[3], "{ not valid metadata");',
+      ].join("\n"),
+      "utf8",
+    );
+    const oversizedScriptPath = join(generationsRoot, "oversized-meta.mjs");
+    await writeFile(
+      oversizedScriptPath,
+      [
+        'import { truncateSync, writeFileSync } from "node:fs";',
+        `writeFileSync(process.argv[2], ${JSON.stringify(editorialCss)});`,
+        'writeFileSync(process.argv[3], "");',
+        "truncateSync(process.argv[3], 2 * 1024 * 1024);",
+      ].join("\n"),
+      "utf8",
+    );
+    const fixtureAdapter = new FixtureContestantAdapter({
+      fixtureRoot: join(repositoryRoot, "test/fixtures/contestants"),
+      delayMs: 1,
+    });
+    const commandAdapter = new CommandContestantAdapter();
+    const mirrorRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-bad-meta-repo-"),
+    );
+    await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
+      recursive: true,
+    });
+    await mkdir(join(mirrorRoot, "config/profiles/fixture"), { recursive: true });
+    const contestantsConfig = parseYaml(
+      await readFile(
+        join(repositoryRoot, "config/profiles/fixture/contestants.yaml"),
+        "utf8",
+      ),
+    ) as {
+      schemaVersion: number;
+      defaults: Record<string, unknown>;
+      contestants: Record<string, unknown>[];
+    };
+    contestantsConfig.contestants = contestantsConfig.contestants.flatMap(
+      (contestant, index) =>
+        index === 0
+          ? [
+              { ...contestant, id: "bad-meta-invalid" },
+              { ...contestant, id: "bad-meta-oversized" },
+            ]
+          : [contestant],
+    );
+    await writeFile(
+      join(mirrorRoot, "config/profiles/fixture/contestants.yaml"),
+      stringifyYaml(contestantsConfig),
+      "utf8",
+    );
+    await writeFile(
+      join(mirrorRoot, "config/profiles/fixture/judges.yaml"),
+      await readFile(join(repositoryRoot, "config/profiles/fixture/judges.yaml")),
+      "utf8",
+    );
+    const badGeneration = await createGeneration({
+      repositoryRoot: mirrorRoot,
+      generationsRoot,
+      seasonId: "0001",
+      profileId: "fixture",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    const adapterCalls = new Map<string, number>();
+    const result = await runWaveB({
+      repositoryRoot: mirrorRoot,
+      generationPath: badGeneration.generationPath,
+      contestantAdapterFactory: (contestant) => {
+        const scriptPath =
+          contestant.id === "bad-meta-invalid"
+            ? invalidScriptPath
+            : contestant.id === "bad-meta-oversized"
+              ? oversizedScriptPath
+              : null;
+        if (scriptPath === null) return fixtureAdapter;
+        return {
+          run: (input) => {
+            adapterCalls.set(contestant.id, (adapterCalls.get(contestant.id) ?? 0) + 1);
+            return commandAdapter.run({
+              ...input,
+              contestant: {
+                ...input.contestant,
+                harness: {
+                  name: "command-fixture",
+                  version: "1.0.0",
+                  adapter: "command",
+                  command: {
+                    argv: [
+                      process.execPath,
+                      scriptPath,
+                      "{submissionPath}",
+                      "{executionMetadataOutputPath}",
+                    ],
+                    environmentAllowlist: [],
+                  },
+                },
+              },
+            });
+          },
+        };
+      },
+    });
+
+    for (const id of ["bad-meta-invalid", "bad-meta-oversized"]) {
+      const contestant = result.contestants.find((entry) => entry.contestantId === id)!;
+      // Handled, not fatal: the submission itself stays valid on one attempt.
+      expect(contestant.run.status).toBe("succeeded");
+      expect(contestant.run.attemptCount).toBe(1);
+      expect(contestant.validation.status).toBe("valid");
+      expect(contestant.run.error).toMatch(/execution metadata/i);
+      expect(contestant.run.observedVersions).toEqual({ harness: null, model: null });
+      await expect(
+        readFile(join(contestant.path, "execution-metadata.json")),
+      ).rejects.toThrow();
+      expect(adapterCalls.get(id)).toBe(1);
+    }
+  }, 60000);
+
+  it("archives valid judge execution metadata privately for candidates and awards without leaking request ids", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-judge-meta-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      profileId: "fixture",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    const scriptPath = join(generationsRoot, "meta-judge.mjs");
+    await writeFile(
+      scriptPath,
+      [
+        'import { writeFileSync } from "node:fs";',
+        "writeFileSync(process.argv[2], process.env.OUTPUT);",
+        "writeFileSync(process.argv[3], process.env.METADATA);",
+      ].join("\n"),
+      "utf8",
+    );
+    const commandJudgeFor = (judge: JudgeConfig) => ({
+      ...judge,
+      harness: {
+        name: "command-judge",
+        version: "1.0.0",
+        adapter: "command" as const,
+        command: {
+          argv: [
+            process.execPath,
+            scriptPath,
+            "{judgmentPath}",
+            "{executionMetadataOutputPath}",
+          ],
+          environmentAllowlist: ["OUTPUT", "METADATA"],
+        },
+      },
+    });
+    const judgeResponseFor = (input: JudgeCandidateInput) =>
+      JSON.stringify({
+        schemaVersion: 1,
+        generationId: input.generationId,
+        judgeId: input.judgeId,
+        anonymousCandidateId: input.anonymousCandidateId,
+        scores: {
+          hierarchyAndReadability: 13,
+          composition: 12,
+          typography: 12,
+          colourAndVisualSystem: 8,
+          coherenceAndCraft: 12,
+          originalityAndMemorability: 17,
+          constraintAndCssCraft: 8,
+        },
+        totalScore: 82,
+        critique:
+          "The hierarchy is clear and the palette feels deliberate. Increase the lower-page contrast next.",
+        strongestQuality: "Clear hierarchy",
+        primaryWeakness: "Quiet lower page",
+        nextMove: "Increase lower-page contrast",
+        confidence: "medium",
+        flags: [],
+      });
+    const metadataFor = (requestId: string) =>
+      JSON.stringify({
+        schemaVersion: 1,
+        observedHarnessVersion: "observed-judge-harness-9.9.9",
+        observedModelVersion: "observed-judge-model-8.8.8",
+        providerRequestId: requestId,
+      });
+    const commandJudge: JudgeAdapter = {
+      scoreCandidate: (input) =>
+        new CommandJudgeAdapter({
+          environment: {
+            OUTPUT: judgeResponseFor(input),
+            METADATA: metadataFor(`req-judge-private-${input.anonymousCandidateId}`),
+          },
+        }).scoreCandidate({
+          ...input,
+          judge: commandJudgeFor(input.judge),
+        }),
+      createAwards: (input: JudgeAwardsInput) =>
+        new CommandJudgeAdapter({
+          environment: {
+            OUTPUT: JSON.stringify({
+              schemaVersion: 1,
+              generationId: input.generationId,
+              judgeId: input.judgeId,
+              awards: [],
+            }),
+            METADATA: metadataFor("req-judge-private-awards"),
+          },
+        }).createAwards({
+          ...input,
+          judge: commandJudgeFor(input.judge),
+        }),
+    };
+
+    const result = await runWaveB({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      judgeAdapterFactory: (judge) =>
+        judge.id === "fixture-critic-a"
+          ? commandJudge
+          : new FixtureJudgeAdapter({ delayMs: 1 }),
+    });
+
+    const commandJudged = result.judges.find(
+      (judge) => judge.judgeId === "fixture-critic-a",
+    )!;
+    expect(commandJudged.failure).toBeNull();
+    expect(commandJudged.awards?.status).toBe("succeeded");
+    expect(commandJudged.candidates).toHaveLength(3);
+    for (const candidate of commandJudged.candidates) {
+      expect(candidate.result.status).toBe("succeeded");
+      expect(candidate.result.metadataProduced).toBe(true);
+      expect(candidate.result.executionMetadata).toEqual({
+        observedHarnessVersion: "observed-judge-harness-9.9.9",
+        observedModelVersion: "observed-judge-model-8.8.8",
+        providerRequestId: `req-judge-private-${candidate.anonymousCandidateId}`,
+      });
+      const archived = ExecutionMetadataFileSchema.parse(
+        JSON.parse(
+          await readFile(
+            join(
+              commandJudged.path,
+              "execution-metadata",
+              `${candidate.anonymousCandidateId}.json`,
+            ),
+            "utf8",
+          ),
+        ) as unknown,
+      );
+      expect(archived).toEqual({
+        schemaVersion: 1,
+        observedHarnessVersion: "observed-judge-harness-9.9.9",
+        observedModelVersion: "observed-judge-model-8.8.8",
+        providerRequestId: `req-judge-private-${candidate.anonymousCandidateId}`,
+      });
+    }
+    const archivedAwards = ExecutionMetadataFileSchema.parse(
+      JSON.parse(
+        await readFile(
+          join(commandJudged.path, "execution-metadata", "awards.json"),
+          "utf8",
+        ),
+      ) as unknown,
+    );
+    expect(archivedAwards.providerRequestId).toBe("req-judge-private-awards");
+
+    // The fixture judge exercises the same archival deterministically.
+    const fixtureJudged = result.judges.find(
+      (judge) => judge.judgeId === "fixture-critic-b",
+    )!;
+    for (const candidate of fixtureJudged.candidates) {
+      const archived = ExecutionMetadataFileSchema.parse(
+        JSON.parse(
+          await readFile(
+            join(
+              fixtureJudged.path,
+              "execution-metadata",
+              `${candidate.anonymousCandidateId}.json`,
+            ),
+            "utf8",
+          ),
+        ) as unknown,
+      );
+      expect(archived).toEqual({
+        schemaVersion: 1,
+        observedHarnessVersion: "fixture-judge-harness-1.0.0",
+        observedModelVersion: "fixture-judge-model-1.0.0",
+        providerRequestId: `fixture-request-judge-fixture-critic-b-${candidate.anonymousCandidateId}`,
+      });
+    }
+    expect(
+      ExecutionMetadataFileSchema.parse(
+        JSON.parse(
+          await readFile(
+            join(fixtureJudged.path, "execution-metadata", "awards.json"),
+            "utf8",
+          ),
+        ) as unknown,
+      ).providerRequestId,
+    ).toBe("fixture-request-judge-fixture-critic-b-awards");
+
+    // Privacy: request ids live only in the private metadata archives.
+    expect(
+      (await filesContaining(generation.generationPath, "req-judge-private-")).sort(),
+    ).toEqual(
+      [
+        ...commandJudged.candidates.map(
+          (candidate) =>
+            `judging/fixture-critic-a/execution-metadata/${candidate.anonymousCandidateId}.json`,
+        ),
+        "judging/fixture-critic-a/execution-metadata/awards.json",
+      ].sort(),
+    );
+    expect(
+      (
+        await filesContaining(generation.generationPath, "fixture-request-judge-")
+      ).sort(),
+    ).toEqual(
+      [
+        ...fixtureJudged.candidates.map(
+          (candidate) =>
+            `judging/fixture-critic-b/execution-metadata/${candidate.anonymousCandidateId}.json`,
+        ),
+        "judging/fixture-critic-b/execution-metadata/awards.json",
+      ].sort(),
+    );
+  }, 60000);
+
+  it("treats missing judge execution metadata as allowed with no durable copy, status change, or retry", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-judge-meta-missing-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      profileId: "fixture",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    const scriptPath = join(generationsRoot, "plain-meta-judge.mjs");
+    await writeFile(
+      scriptPath,
+      [
+        'import { writeFileSync } from "node:fs";',
+        "writeFileSync(process.argv[2], process.env.OUTPUT);",
+      ].join("\n"),
+      "utf8",
+    );
+    const commandJudgeFor = (judge: JudgeConfig) => ({
+      ...judge,
+      harness: {
+        name: "command-judge",
+        version: "1.0.0",
+        adapter: "command" as const,
+        command: {
+          argv: [process.execPath, scriptPath, "{judgmentPath}"],
+          environmentAllowlist: ["OUTPUT"],
+        },
+      },
+    });
+    const calls: string[] = [];
+    const commandJudge: JudgeAdapter = {
+      scoreCandidate: (input) => {
+        calls.push(`candidate:${input.anonymousCandidateId}`);
+        return new CommandJudgeAdapter({
+          environment: {
+            OUTPUT: JSON.stringify({
+              schemaVersion: 1,
+              generationId: input.generationId,
+              judgeId: input.judgeId,
+              anonymousCandidateId: input.anonymousCandidateId,
+              scores: {
+                hierarchyAndReadability: 13,
+                composition: 12,
+                typography: 12,
+                colourAndVisualSystem: 8,
+                coherenceAndCraft: 12,
+                originalityAndMemorability: 17,
+                constraintAndCssCraft: 8,
+              },
+              totalScore: 82,
+              critique:
+                "The hierarchy is clear and the palette feels deliberate. Increase the lower-page contrast next.",
+              strongestQuality: "Clear hierarchy",
+              primaryWeakness: "Quiet lower page",
+              nextMove: "Increase lower-page contrast",
+              confidence: "medium",
+              flags: [],
+            }),
+          },
+        }).scoreCandidate({ ...input, judge: commandJudgeFor(input.judge) });
+      },
+      createAwards: (input) => {
+        calls.push("awards");
+        return new CommandJudgeAdapter({
+          environment: {
+            OUTPUT: JSON.stringify({
+              schemaVersion: 1,
+              generationId: input.generationId,
+              judgeId: input.judgeId,
+              awards: [],
+            }),
+          },
+        }).createAwards({ ...input, judge: commandJudgeFor(input.judge) });
+      },
+    };
+
+    const result = await runWaveB({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      judgeAdapters: new Map([["fixture-critic-a", commandJudge]]),
+    });
+    const judged = result.judges.find((judge) => judge.judgeId === "fixture-critic-a")!;
+    expect(judged.failure).toBeNull();
+    for (const candidate of judged.candidates) {
+      expect(candidate.result.status).toBe("succeeded");
+      expect(candidate.result.attemptCount).toBe(1);
+      expect(candidate.result.metadataProduced).toBe(false);
+      expect(candidate.result.executionMetadata).toEqual({
+        observedHarnessVersion: null,
+        observedModelVersion: null,
+        providerRequestId: null,
+      });
+      expect(candidate.result.error).toBeNull();
+      await expect(
+        readFile(
+          join(
+            judged.path,
+            "execution-metadata",
+            `${candidate.anonymousCandidateId}.json`,
+          ),
+        ),
+      ).rejects.toThrow();
+    }
+    expect(judged.awards?.status).toBe("succeeded");
+    expect(judged.awards?.metadataProduced).toBe(false);
+    await expect(
+      readFile(join(judged.path, "execution-metadata", "awards.json")),
+    ).rejects.toThrow();
+    expect(calls.filter((call) => call.startsWith("candidate:"))).toHaveLength(3);
+    expect(calls.filter((call) => call === "awards")).toHaveLength(1);
+  }, 60000);
+
+  it("bounds invalid or oversized judge metadata without archive, retry, or status change", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-wave-b-judge-meta-bad-"),
+    );
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      profileId: "fixture",
+      generationId: "0001",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+    const invalidScriptPath = join(generationsRoot, "invalid-meta-judge.mjs");
+    await writeFile(
+      invalidScriptPath,
+      [
+        'import { writeFileSync } from "node:fs";',
+        "writeFileSync(process.argv[2], process.env.OUTPUT);",
+        'writeFileSync(process.argv[3], "{ not valid metadata");',
+      ].join("\n"),
+      "utf8",
+    );
+    const oversizedScriptPath = join(generationsRoot, "oversized-meta-judge.mjs");
+    await writeFile(
+      oversizedScriptPath,
+      [
+        'import { truncateSync, writeFileSync } from "node:fs";',
+        "writeFileSync(process.argv[2], process.env.OUTPUT);",
+        'writeFileSync(process.argv[3], "");',
+        "truncateSync(process.argv[3], 2 * 1024 * 1024);",
+      ].join("\n"),
+      "utf8",
+    );
+    const commandJudgeFor = (judge: JudgeConfig, scriptPath: string) => ({
+      ...judge,
+      harness: {
+        name: "command-judge",
+        version: "1.0.0",
+        adapter: "command" as const,
+        command: {
+          argv: [
+            process.execPath,
+            scriptPath,
+            "{judgmentPath}",
+            "{executionMetadataOutputPath}",
+          ],
+          environmentAllowlist: ["OUTPUT"],
+        },
+      },
+    });
+    const callCounts = new Map<string, number>();
+    const badMetaJudge = (scriptPath: string): JudgeAdapter => ({
+      scoreCandidate: (input) => {
+        const key = `candidate:${input.judgeId}:${input.anonymousCandidateId}`;
+        callCounts.set(key, (callCounts.get(key) ?? 0) + 1);
+        return new CommandJudgeAdapter({
+          environment: {
+            OUTPUT: JSON.stringify({
+              schemaVersion: 1,
+              generationId: input.generationId,
+              judgeId: input.judgeId,
+              anonymousCandidateId: input.anonymousCandidateId,
+              scores: {
+                hierarchyAndReadability: 13,
+                composition: 12,
+                typography: 12,
+                colourAndVisualSystem: 8,
+                coherenceAndCraft: 12,
+                originalityAndMemorability: 17,
+                constraintAndCssCraft: 8,
+              },
+              totalScore: 82,
+              critique:
+                "The hierarchy is clear and the palette feels deliberate. Increase the lower-page contrast next.",
+              strongestQuality: "Clear hierarchy",
+              primaryWeakness: "Quiet lower page",
+              nextMove: "Increase lower-page contrast",
+              confidence: "medium",
+              flags: [],
+            }),
+          },
+        }).scoreCandidate({
+          ...input,
+          judge: commandJudgeFor(input.judge, scriptPath),
+        });
+      },
+      createAwards: (input) => {
+        callCounts.set(
+          `awards:${input.judgeId}`,
+          (callCounts.get(`awards:${input.judgeId}`) ?? 0) + 1,
+        );
+        return new CommandJudgeAdapter({
+          environment: {
+            OUTPUT: JSON.stringify({
+              schemaVersion: 1,
+              generationId: input.generationId,
+              judgeId: input.judgeId,
+              awards: [],
+            }),
+          },
+        }).createAwards({
+          ...input,
+          judge: commandJudgeFor(input.judge, scriptPath),
+        });
+      },
+    });
+
+    const result = await runWaveB({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      judgeAdapters: new Map([
+        ["fixture-critic-a", badMetaJudge(invalidScriptPath)],
+        ["fixture-critic-b", badMetaJudge(oversizedScriptPath)],
+      ]),
+    });
+
+    for (const judgeId of ["fixture-critic-a", "fixture-critic-b"]) {
+      const judged = result.judges.find((judge) => judge.judgeId === judgeId)!;
+      expect(judged.failure).toBeNull();
+      for (const candidate of judged.candidates) {
+        // Handled, not fatal: the durable judgment still succeeds on one call.
+        expect(candidate.result.status).toBe("succeeded");
+        expect(candidate.result.attemptCount).toBe(1);
+        expect(candidate.result.error).toMatch(/execution metadata/i);
+        expect(candidate.result.metadataProduced).toBe(true);
+        expect(candidate.result.executionMetadata).toEqual({
+          observedHarnessVersion: null,
+          observedModelVersion: null,
+          providerRequestId: null,
+        });
+        expect(candidate.durablePath).not.toBeNull();
+        await expect(
+          readFile(
+            join(
+              judged.path,
+              "execution-metadata",
+              `${candidate.anonymousCandidateId}.json`,
+            ),
+          ),
+        ).rejects.toThrow();
+        expect(
+          callCounts.get(`candidate:${judgeId}:${candidate.anonymousCandidateId}`),
+        ).toBe(1);
+      }
+      expect(judged.awards?.status).toBe("succeeded");
+      expect(judged.awards?.error).toMatch(/execution metadata/i);
+      await expect(
+        readFile(join(judged.path, "execution-metadata", "awards.json")),
+      ).rejects.toThrow();
+      expect(callCounts.get(`awards:${judgeId}`)).toBe(1);
+    }
+  }, 60000);
+
   it("does not mark a judge candidate successful when usage archival is oversized", async () => {
     const generationsRoot = await mkdtemp(
       join(tmpdir(), "local-maxima-wave-b-judge-usage-cap-"),
@@ -974,6 +1835,8 @@ describe("Wave-B fixture orchestration", () => {
         error: "injected awards failure",
         timedOut: false,
         attemptCount: 1 as const,
+        executionMetadata: emptyExecutionMetadata(),
+        metadataProduced: false,
       }),
     };
 

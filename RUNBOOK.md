@@ -3,10 +3,14 @@
 1. Install with `pnpm install --frozen-lockfile`, install Chromium with
    `pnpm exec playwright install chromium`, and run
    `pnpm garden verify --profile fixture`.
-2. Run `pnpm garden fixture-tournament` and inspect the printed generation and
-   gallery paths. Confirm `manifest.json` is `completed`, the leaderboard names
+2. Run `pnpm garden fixture-tournament` and inspect the printed generation,
+   gallery, and `run-summary.json` paths. Confirm `manifest.json` is
+   `completed`, the leaderboard names
    the expected champion, and `public/champion.css` matches that contestant's
-   `submission.css` byte-for-byte.
+   `submission.css` byte-for-byte. Confirm the private `run-summary.json` sits
+   at the generation root (never under `public/`) and that its per-contestant,
+   per-judge, task-count, totals, and resource-group sections match the durable
+   artifacts.
 3. Open `public/index.html` or use `pnpm garden serve-gallery --generation-path
 /absolute/path/to/generation`. The server prints a loopback URL; stop it
    with Ctrl-C and check that the process exits.
@@ -43,7 +47,22 @@
    `config/contestants.yaml`, `config/judges.yaml`, and `config/profile.json`,
    never from the currently selected profile. The private `run-plan.json` is
    hashed into the snapshot and is never rebuilt or published.
+9. Regenerate the private `run-summary.json` with
+   `pnpm garden summarize-generation --generation <id> --generations-root <root>`
+   or `pnpm garden summarize-generation --generation-path /absolute/path/to/generation`.
+   It makes no model call, needs no `--profile` or `--allow-model-calls`, and
+   reproduces byte-identical output from the durable artifacts (its timestamp is
+   the recorded `manifest.completedAt`). A normal completed run already wrote
+   this file; the command is for offline audit or after an operator inspection.
+   Read the summary as a completeness map: `null` is unknown, `0` is a known
+   zero, and any aggregate labelled `"partial"` means at least one relevant call
+   lacked usage or cost. Provider request IDs, detailed usage, prompts, logs,
+   command paths, environment names, credentials, and judge costs stay private
+   and are never copied into `public/`.
 
 Do not publish `anonymous-map.json`, `logs/`, `raw/`, prompts, usage, private
-workspaces, or competitor CSS. Do not infer artistic quality, fairness, or
+workspaces, competitor CSS, `run-summary.json`, `run-plan.json`, or the private
+`execution-metadata.json` files under `contestants/<id>/` and
+`judging/<judge>/execution-metadata/`; none of them are ever copied into
+`public/`. Do not infer artistic quality, fairness, or
 general reproducibility from the deterministic fixture result.

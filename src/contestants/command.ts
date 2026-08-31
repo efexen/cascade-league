@@ -9,7 +9,7 @@ import type {
 import {
   DEFAULT_TERMINATION_GRACE_MS,
   DEFAULT_LOG_LIMIT_BYTES,
-  NOT_RECORDED_VERSION,
+  readExecutionMetadataFile,
   readUsageFile,
   regularFileExists,
   runBoundedCommand,
@@ -23,6 +23,7 @@ export interface ContestantCommandPaths {
   readonly promptPath: string;
   readonly submissionPath: string;
   readonly usageOutputPath: string;
+  readonly executionMetadataOutputPath: string;
 }
 
 export type SpawnProcess = CommandSpawnProcess;
@@ -42,6 +43,7 @@ function placeholderValues(paths: ContestantCommandPaths): ReadonlyMap<string, s
     ["{promptPath}", paths.promptPath],
     ["{submissionPath}", paths.submissionPath],
     ["{usageOutputPath}", paths.usageOutputPath],
+    ["{executionMetadataOutputPath}", paths.executionMetadataOutputPath],
   ]);
 }
 
@@ -137,8 +139,14 @@ export class CommandContestantAdapter implements ContestantAdapter {
     });
 
     const usageResult = await readUsageFile(input.usageOutputPath, false);
+    const metadataResult = await readExecutionMetadataFile(
+      input.executionMetadataOutputPath,
+    );
     const submissionProduced = await regularFileExists(input.submissionPath);
-    let error: string | null = appendError(processResult.error, usageResult.error);
+    let error: string | null = appendError(
+      appendError(processResult.error, usageResult.error),
+      metadataResult.error,
+    );
     if (processResult.timedOut) {
       error = appendError(error, "contestant process timed out");
     } else if (processResult.exitCode !== 0) {
@@ -168,9 +176,11 @@ export class CommandContestantAdapter implements ContestantAdapter {
       attemptCount: 1,
       usage: usageResult.usage,
       observedVersions: {
-        harness: input.contestant.harness.version ?? NOT_RECORDED_VERSION,
-        model: input.contestant.model.version,
+        harness: metadataResult.metadata.observedHarnessVersion,
+        model: metadataResult.metadata.observedModelVersion,
       },
+      executionMetadata: metadataResult.metadata,
+      metadataProduced: metadataResult.exists,
       error,
       submissionProduced,
       usageProduced: usageResult.exists,

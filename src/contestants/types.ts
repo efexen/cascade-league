@@ -1,5 +1,6 @@
 import type { Run } from "../schemas/index.js";
 import type { ContestantConfig } from "../schemas/index.js";
+import type { ExecutionMetadata } from "./support.js";
 
 export type ContestantRunUsage = Run["usage"];
 export type ContestantRunStatus = Run["status"];
@@ -15,6 +16,7 @@ export interface ContestantRunInput {
   readonly promptPath: string;
   readonly submissionPath: string;
   readonly usageOutputPath: string;
+  readonly executionMetadataOutputPath: string;
   readonly stdoutLogPath: string;
   readonly stderrLogPath: string;
   readonly timeoutMs: number;
@@ -29,9 +31,11 @@ export interface ContestantRunResult {
   readonly attemptCount: 1;
   readonly usage: ContestantRunUsage;
   readonly observedVersions: {
-    readonly harness: string;
-    readonly model: string;
+    readonly harness: string | null;
+    readonly model: string | null;
   };
+  readonly executionMetadata: ExecutionMetadata;
+  readonly metadataProduced: boolean;
   readonly error: string | null;
   readonly submissionProduced: boolean;
   readonly usageProduced: boolean;

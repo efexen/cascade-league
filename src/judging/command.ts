@@ -13,6 +13,7 @@ import {
   DEFAULT_LOG_LIMIT_BYTES,
   boundedUtf8,
   emptyUsage,
+  readExecutionMetadataFile,
   readUsageFile,
   readRegularFileAtMost,
   runBoundedCommand,
@@ -36,6 +37,7 @@ export interface JudgeCommandPaths {
   readonly sanitisedCssPath: string;
   readonly judgmentPath: string;
   readonly usageOutputPath: string;
+  readonly executionMetadataOutputPath: string;
   readonly judgmentSummaryPath: string;
   readonly awardsPath: string;
 }
@@ -69,6 +71,7 @@ function pathsMap(paths: JudgeCommandPaths): ReadonlyMap<string, string> {
     ["{sanitisedCssPath}", paths.sanitisedCssPath],
     ["{judgmentPath}", paths.judgmentPath],
     ["{usageOutputPath}", paths.usageOutputPath],
+    ["{executionMetadataOutputPath}", paths.executionMetadataOutputPath],
     ["{judgmentSummaryPath}", paths.judgmentSummaryPath],
     ["{awardsPath}", paths.awardsPath],
   ]);
@@ -219,6 +222,7 @@ export class CommandJudgeAdapter implements JudgeAdapter {
         sanitisedCssPath: input.sanitisedCssPath,
         judgmentPath: input.judgmentPath,
         usageOutputPath: input.usageOutputPath,
+        executionMetadataOutputPath: input.executionMetadataOutputPath,
         // These aliases intentionally point at the operation's one output.
         // The judge command is configured once and must work for both calls.
         judgmentSummaryPath: input.judgmentPath,
@@ -235,6 +239,7 @@ export class CommandJudgeAdapter implements JudgeAdapter {
       sanitisedCssPath: join(input.workspacePath, "candidate.css"),
       judgmentPath: input.awardsPath,
       usageOutputPath: input.usageOutputPath,
+      executionMetadataOutputPath: input.executionMetadataOutputPath,
       judgmentSummaryPath: input.judgmentSummaryPath,
       // Both output aliases target the awards output for the awards call.
       awardsPath: input.awardsPath,
@@ -287,6 +292,16 @@ export class CommandJudgeAdapter implements JudgeAdapter {
     if (rawOutput.length > 0) await writeTextAtomically(input.rawOutputPath, rawOutput);
     const usageResult = await readUsageFile(input.usageOutputPath, false);
     const usage = measuredUsageFromFile(usageResult.usage);
+    // Bounded strict read of the optional private execution-metadata file,
+    // equivalent to the contestant contract: missing metadata is allowed and
+    // never changes the terminal result; invalid or oversized metadata stays
+    // explicitly incomplete (null observations plus a bounded note) without
+    // retry or crash.
+    const metadataResult = await readExecutionMetadataFile(
+      input.executionMetadataOutputPath,
+    );
+    const executionMetadata = metadataResult.metadata;
+    const metadataProduced = metadataResult.exists;
     if (processResult.timedOut) {
       return {
         status: "timeout",
@@ -294,9 +309,14 @@ export class CommandJudgeAdapter implements JudgeAdapter {
         judgment: null,
         usage,
         rawOutput: rawOutput.length === 0 ? null : rawOutput,
-        error: appendError(processResult.error, "judge process timed out"),
+        error: appendError(
+          appendError(processResult.error, "judge process timed out"),
+          metadataResult.error,
+        ),
         timedOut: true,
         attemptCount: 1,
+        executionMetadata,
+        metadataProduced,
       };
     }
     if (processResult.error !== null || processResult.exitCode !== 0) {
@@ -307,13 +327,18 @@ export class CommandJudgeAdapter implements JudgeAdapter {
         usage,
         rawOutput: rawOutput.length === 0 ? null : rawOutput,
         error: appendError(
-          processResult.error,
-          processResult.exitCode === null
-            ? "judge process did not exit normally"
-            : `judge process exited with code ${String(processResult.exitCode)}`,
+          appendError(
+            processResult.error,
+            processResult.exitCode === null
+              ? "judge process did not exit normally"
+              : `judge process exited with code ${String(processResult.exitCode)}`,
+          ),
+          metadataResult.error,
         ),
         timedOut: false,
         attemptCount: 1,
+        executionMetadata,
+        metadataProduced,
       };
     }
     if (oversizedOutput !== null) {
@@ -323,9 +348,11 @@ export class CommandJudgeAdapter implements JudgeAdapter {
         judgment: null,
         usage,
         rawOutput: rawOutput.length === 0 ? null : rawOutput,
-        error: oversizedOutput,
+        error: appendError(oversizedOutput, metadataResult.error),
         timedOut: false,
         attemptCount: 1,
+        executionMetadata,
+        metadataProduced,
       };
     }
     if (!outputExists) {
@@ -335,9 +362,11 @@ export class CommandJudgeAdapter implements JudgeAdapter {
         judgment: null,
         usage,
         rawOutput: rawOutput.length === 0 ? null : rawOutput,
-        error: "judge did not produce judgment.json",
+        error: appendError("judge did not produce judgment.json", metadataResult.error),
         timedOut: false,
         attemptCount: 1,
+        executionMetadata,
+        metadataProduced,
       };
     }
     try {
@@ -356,9 +385,11 @@ export class CommandJudgeAdapter implements JudgeAdapter {
         judgment,
         usage,
         rawOutput,
-        error: usageResult.error,
+        error: appendError(usageResult.error, metadataResult.error),
         timedOut: false,
         attemptCount: 1,
+        executionMetadata,
+        metadataProduced,
       };
     } catch (error) {
       return {
@@ -367,9 +398,14 @@ export class CommandJudgeAdapter implements JudgeAdapter {
         judgment: null,
         usage,
         rawOutput: rawOutput.length === 0 ? null : rawOutput,
-        error: `judge response validation failed: ${error instanceof Error ? error.message : String(error)}`,
+        error: appendError(
+          `judge response validation failed: ${error instanceof Error ? error.message : String(error)}`,
+          metadataResult.error,
+        ),
         timedOut: false,
         attemptCount: 1,
+        executionMetadata,
+        metadataProduced,
       };
     }
   }
@@ -407,15 +443,24 @@ export class CommandJudgeAdapter implements JudgeAdapter {
     if (rawOutput.length > 0) await writeTextAtomically(input.rawOutputPath, rawOutput);
     const usageResult = await readUsageFile(input.usageOutputPath, false);
     const usage = measuredUsageFromFile(usageResult.usage);
+    // Same bounded, non-fatal execution-metadata contract as candidate
+    // scoring and the contestant adapter.
+    const metadataResult = await readExecutionMetadataFile(
+      input.executionMetadataOutputPath,
+    );
+    const executionMetadata = metadataResult.metadata;
+    const metadataProduced = metadataResult.exists;
     if (processResult.timedOut) {
       return {
         status: "timeout",
         awards: null,
         rawOutput: rawOutput.length === 0 ? null : rawOutput,
         usage,
-        error: "awards process timed out",
+        error: appendError("awards process timed out", metadataResult.error),
         timedOut: true,
         attemptCount: 1,
+        executionMetadata,
+        metadataProduced,
       };
     }
     if (processResult.error !== null || processResult.exitCode !== 0) {
@@ -425,13 +470,18 @@ export class CommandJudgeAdapter implements JudgeAdapter {
         rawOutput: rawOutput.length === 0 ? null : rawOutput,
         usage,
         error: appendError(
-          appendError(processResult.error, usageResult.error),
-          processResult.exitCode === null
-            ? "awards process did not exit normally"
-            : `awards process exited with code ${String(processResult.exitCode)}`,
+          appendError(
+            appendError(processResult.error, usageResult.error),
+            processResult.exitCode === null
+              ? "awards process did not exit normally"
+              : `awards process exited with code ${String(processResult.exitCode)}`,
+          ),
+          metadataResult.error,
         ),
         timedOut: false,
         attemptCount: 1,
+        executionMetadata,
+        metadataProduced,
       };
     }
     if (oversizedOutput !== null) {
@@ -440,9 +490,11 @@ export class CommandJudgeAdapter implements JudgeAdapter {
         awards: null,
         rawOutput: rawOutput.length === 0 ? null : rawOutput,
         usage,
-        error: oversizedOutput,
+        error: appendError(oversizedOutput, metadataResult.error),
         timedOut: false,
         attemptCount: 1,
+        executionMetadata,
+        metadataProduced,
       };
     }
     if (!outputExists) {
@@ -451,9 +503,11 @@ export class CommandJudgeAdapter implements JudgeAdapter {
         awards: null,
         rawOutput: rawOutput.length === 0 ? null : rawOutput,
         usage,
-        error: "judge did not produce awards.json",
+        error: appendError("judge did not produce awards.json", metadataResult.error),
         timedOut: false,
         attemptCount: 1,
+        executionMetadata,
+        metadataProduced,
       };
     }
     try {
@@ -471,9 +525,11 @@ export class CommandJudgeAdapter implements JudgeAdapter {
         awards: parsed,
         rawOutput,
         usage,
-        error: null,
+        error: metadataResult.error,
         timedOut: false,
         attemptCount: 1,
+        executionMetadata,
+        metadataProduced,
       };
     } catch (error) {
       return {
@@ -481,9 +537,14 @@ export class CommandJudgeAdapter implements JudgeAdapter {
         awards: null,
         rawOutput: rawOutput.length === 0 ? null : rawOutput,
         usage,
-        error: `awards response validation failed: ${error instanceof Error ? error.message : String(error)}`,
+        error: appendError(
+          `awards response validation failed: ${error instanceof Error ? error.message : String(error)}`,
+          metadataResult.error,
+        ),
         timedOut: false,
         attemptCount: 1,
+        executionMetadata,
+        metadataProduced,
       };
     }
   }

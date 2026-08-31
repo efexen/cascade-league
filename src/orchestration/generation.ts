@@ -14,6 +14,7 @@ import {
   type Manifest,
 } from "../schemas/index.js";
 import { writeTextAtomically } from "../contestants/support.js";
+import { summarizeGeneration } from "../summarize/index.js";
 import { runWaveB, type WaveBRunOptions } from "./wave-b.js";
 
 export interface GenerationRunOptions extends WaveBRunOptions {
@@ -25,6 +26,7 @@ export interface GenerationRunResult {
   readonly generationId: string;
   readonly leaderboard: Leaderboard;
   readonly gallery: BuiltGallery;
+  readonly runSummaryPath: string;
 }
 
 function operationTimestamp(options: GenerationRunOptions, manifest: Manifest): string {
@@ -116,14 +118,20 @@ export async function runGeneration(
     leaderboard,
   });
   manifest = await updateManifest(generationPath, { status: "gallery_complete" });
-  await updateManifest(generationPath, {
+  manifest = await updateManifest(generationPath, {
     status: "completed",
     completedAt: operationTimestamp(options, manifest),
   });
+  // Phase 2 §6.8: derive the private run summary from the just-persisted
+  // durable completion. `summarizeGeneration` reads `manifest.completedAt`
+  // back from disk (never the in-memory options), so a later
+  // `garden summarize-generation` reproduces byte-identical bytes.
+  const runSummaryPath = await summarizeGeneration(generationPath);
   return {
     generationPath,
     generationId: manifest.generationId,
     leaderboard,
     gallery,
+    runSummaryPath,
   };
 }

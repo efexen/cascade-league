@@ -12,6 +12,7 @@ export const DEFAULT_LOG_LIMIT_BYTES = 128 * 1024;
 export const DEFAULT_TERMINATION_GRACE_MS = 250;
 export const DEFAULT_TERMINATION_COMPLETION_GRACE_MS = 250;
 export const DEFAULT_USAGE_LIMIT_BYTES = 64 * 1024;
+export const DEFAULT_EXECUTION_METADATA_LIMIT_BYTES = 16 * 1024;
 export const DEFAULT_JUDGE_OUTPUT_LIMIT_BYTES = 128 * 1024;
 export const NOT_RECORDED_VERSION = "not-recorded";
 
@@ -25,6 +26,38 @@ const UsageFileSchema = z
     tokenLimitEnforced: z.boolean().optional(),
   })
   .strict();
+
+const OptionalVersionText = (maximum: number) =>
+  z
+    .string()
+    .min(1)
+    .max(maximum)
+    .refine((value) => value.trim().length > 0, "must not be blank")
+    .nullable();
+
+// The optional, private `execution-metadata.json` a harness wrapper may write
+// beside its usage file. It records what the harness actually observed at run
+// time (never the configured identity) plus a private provider request id.
+export const ExecutionMetadataFileSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    observedHarnessVersion: OptionalVersionText(200),
+    observedModelVersion: OptionalVersionText(200),
+    providerRequestId: OptionalVersionText(256),
+  })
+  .strict();
+
+export interface ExecutionMetadata {
+  readonly observedHarnessVersion: string | null;
+  readonly observedModelVersion: string | null;
+  readonly providerRequestId: string | null;
+}
+
+export const emptyExecutionMetadata = (): ExecutionMetadata => ({
+  observedHarnessVersion: null,
+  observedModelVersion: null,
+  providerRequestId: null,
+});
 
 export type BoundedFileReadResult =
   | { readonly kind: "missing"; readonly size: 0 }
@@ -533,6 +566,54 @@ export async function readUsageFile(
       exists: true,
       usage: emptyUsage(tokenLimitEnforced),
       error: `usage metadata was invalid: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+export async function readExecutionMetadataFile(path: string): Promise<{
+  metadata: ExecutionMetadata;
+  exists: boolean;
+  error: string | null;
+}> {
+  const file = await readRegularFileAtMost(
+    path,
+    DEFAULT_EXECUTION_METADATA_LIMIT_BYTES,
+  );
+  if (file.kind === "missing") {
+    return { metadata: emptyExecutionMetadata(), exists: false, error: null };
+  }
+  if (file.kind === "too_large") {
+    return {
+      metadata: emptyExecutionMetadata(),
+      exists: true,
+      error: `execution metadata exceeds the ${DEFAULT_EXECUTION_METADATA_LIMIT_BYTES}-byte limit`,
+    };
+  }
+  if (file.kind !== "ok") {
+    return {
+      metadata: emptyExecutionMetadata(),
+      exists: true,
+      error: "execution metadata is not a regular file",
+    };
+  }
+  try {
+    const parsed = ExecutionMetadataFileSchema.parse(
+      JSON.parse(file.bytes.toString("utf8")) as unknown,
+    );
+    return {
+      exists: true,
+      error: null,
+      metadata: {
+        observedHarnessVersion: parsed.observedHarnessVersion,
+        observedModelVersion: parsed.observedModelVersion,
+        providerRequestId: parsed.providerRequestId,
+      },
+    };
+  } catch (error) {
+    return {
+      exists: true,
+      metadata: emptyExecutionMetadata(),
+      error: `execution metadata was invalid: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
 }

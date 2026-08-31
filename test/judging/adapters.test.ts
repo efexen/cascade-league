@@ -10,6 +10,7 @@ import {
   type JudgeCandidateInput,
   type JudgeAwardsInput,
 } from "../../src/judging/index.js";
+import { ExecutionMetadataFileSchema } from "../../src/contestants/support.js";
 import {
   CandidateJudgmentSchema,
   JudgeCandidateResponseSchema,
@@ -44,12 +45,37 @@ function candidateInput(root: string): JudgeCandidateInput {
     judgmentPath: join(root, "judgment.json"),
     rawOutputPath: join(root, "raw.json"),
     usageOutputPath: join(root, "usage.json"),
+    executionMetadataOutputPath: join(root, "execution-metadata.json"),
     stdoutLogPath: join(root, "stdout.log"),
     stderrLogPath: join(root, "stderr.log"),
     timeoutMs: 1000,
     maximumOutputTokens: 100,
   };
 }
+
+const CANDIDATE_RESPONSE = {
+  schemaVersion: 1,
+  generationId: "0001",
+  judgeId: "fixture-critic-a",
+  anonymousCandidateId: "candidate-abcd",
+  scores: {
+    hierarchyAndReadability: 13,
+    composition: 12,
+    typography: 12,
+    colourAndVisualSystem: 8,
+    coherenceAndCraft: 12,
+    originalityAndMemorability: 17,
+    constraintAndCssCraft: 8,
+  },
+  totalScore: 82,
+  critique:
+    "The hierarchy is clear and the palette feels deliberate. Increase the lower-page contrast next.",
+  strongestQuality: "Clear hierarchy",
+  primaryWeakness: "Quiet lower page",
+  nextMove: "Increase lower-page contrast",
+  confidence: "medium",
+  flags: [],
+};
 
 describe("fixture judge adapter", () => {
   it("emits a strict score response without model usage and a durable judgment with usage", async () => {
@@ -101,6 +127,7 @@ describe("fixture judge adapter", () => {
       judgmentSummaryPath: join(root, "summary.json"),
       awardsPath: join(root, "awards.json"),
       usageOutputPath: join(root, "awards-usage.json"),
+      executionMetadataOutputPath: join(root, "awards-execution-metadata.json"),
       rawOutputPath: join(root, "awards-raw.json"),
       stdoutLogPath: join(root, "awards.stdout.log"),
       stderrLogPath: join(root, "awards.stderr.log"),
@@ -336,6 +363,14 @@ describe("command judge adapter", () => {
         'import { writeFileSync } from "node:fs";',
         "writeFileSync(process.argv[7], process.env.OUTPUT);",
         "writeFileSync(process.argv[8], JSON.stringify({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }));",
+        `writeFileSync(process.argv[11], ${JSON.stringify(
+          JSON.stringify({
+            schemaVersion: 1,
+            observedHarnessVersion: "observed-judge-harness-9.9.9",
+            observedModelVersion: "observed-judge-model-8.8.8",
+            providerRequestId: "req-judge-private-77",
+          }),
+        )});`,
       ].join("\n"),
       "utf8",
     );
@@ -355,6 +390,7 @@ describe("command judge adapter", () => {
           "{usageOutputPath}",
           "{judgmentSummaryPath}",
           "{awardsPath}",
+          "{executionMetadataOutputPath}",
         ],
         environmentAllowlist: ["OUTPUT"],
       },
@@ -383,6 +419,7 @@ describe("command judge adapter", () => {
       judgmentSummaryPath: join(root, "summary.json"),
       awardsPath: join(root, "awards.json"),
       usageOutputPath: join(root, "awards-usage.json"),
+      executionMetadataOutputPath: join(root, "awards-execution-metadata.json"),
       rawOutputPath: join(root, "awards-raw.json"),
       stdoutLogPath: join(root, "awards.stdout.log"),
       stderrLogPath: join(root, "awards.stderr.log"),
@@ -405,9 +442,21 @@ describe("command judge adapter", () => {
     expect(awardsResult.status).toBe("succeeded");
     expect(seen).toHaveLength(2);
     for (const argv of seen) {
-      expect(argv.slice(1)).toHaveLength(9);
+      expect(argv.slice(1)).toHaveLength(10);
       expect(argv.slice(1).every((value) => value.length > 0)).toBe(true);
       expect(argv.join(" ")).not.toContain("fixture-editorial");
+    }
+    // The metadata placeholder materializes to the exact complete path for
+    // both operations, and the adapter reads the wrapper's report back.
+    expect(seen[0]![10]).toBe(input.executionMetadataOutputPath);
+    expect(seen[1]![10]).toBe(awardsInput.executionMetadataOutputPath);
+    for (const result of [candidateResult, awardsResult]) {
+      expect(result.metadataProduced).toBe(true);
+      expect(result.executionMetadata).toEqual({
+        observedHarnessVersion: "observed-judge-harness-9.9.9",
+        observedModelVersion: "observed-judge-model-8.8.8",
+        providerRequestId: "req-judge-private-77",
+      });
     }
   });
 
@@ -596,6 +645,7 @@ describe("command judge adapter", () => {
       judgmentSummaryPath: join(root, "judgment-summary.json"),
       awardsPath: join(root, "awards.json"),
       usageOutputPath: join(root, "awards-usage.json"),
+      executionMetadataOutputPath: join(root, "awards-execution-metadata.json"),
       rawOutputPath: join(root, "awards-raw.json"),
       stdoutLogPath: join(root, "awards.stdout.log"),
       stderrLogPath: join(root, "awards.stderr.log"),
@@ -674,6 +724,7 @@ describe("command judge adapter", () => {
       judgmentSummaryPath: join(root, "judgment-summary.json"),
       awardsPath: join(root, "awards.json"),
       usageOutputPath: join(root, "awards-usage.json"),
+      executionMetadataOutputPath: join(root, "awards-execution-metadata.json"),
       rawOutputPath: join(root, "awards-raw.json"),
       stdoutLogPath: join(root, "awards.stdout.log"),
       stderrLogPath: join(root, "awards.stderr.log"),
@@ -719,5 +770,254 @@ describe("command judge adapter", () => {
     expect(result.rawOutput?.length).toBeLessThan(1000);
     expect((await readFile(awardsInput.rawOutputPath)).byteLength).toBeLessThan(1000);
     expect(result.error).toMatch(/exceed|large/i);
+  });
+});
+
+describe("judge execution metadata", () => {
+  const VALID_METADATA = {
+    schemaVersion: 1,
+    observedHarnessVersion: "observed-judge-harness-9.9.9",
+    observedModelVersion: "observed-judge-model-8.8.8",
+    providerRequestId: "req-judge-private-42",
+  };
+
+  function awardsInputFor(root: string, input: JudgeCandidateInput): JudgeAwardsInput {
+    return {
+      generationId: input.generationId,
+      judgeId: input.judgeId,
+      judge: input.judge,
+      workspacePath: root,
+      promptPath: join(root, "awards-prompt.md"),
+      contactSheetPath: input.contactSheetPath,
+      judgmentSummaryPath: join(root, "judgment-summary.json"),
+      awardsPath: join(root, "awards.json"),
+      usageOutputPath: join(root, "awards-usage.json"),
+      executionMetadataOutputPath: join(root, "awards-execution-metadata.json"),
+      rawOutputPath: join(root, "awards-raw.json"),
+      stdoutLogPath: join(root, "awards.stdout.log"),
+      stderrLogPath: join(root, "awards.stderr.log"),
+      timeoutMs: 1000,
+      maximumOutputTokens: 100,
+      candidates: [
+        {
+          anonymousCandidateId: input.anonymousCandidateId,
+          judgment: null,
+          sanitisedCssPath: input.sanitisedCssPath,
+        },
+        {
+          anonymousCandidateId: "candidate-efgh",
+          judgment: null,
+          sanitisedCssPath: input.sanitisedCssPath,
+        },
+      ],
+    };
+  }
+
+  function commandJudge(
+    input: JudgeCandidateInput,
+    scriptPath: string,
+    argv: string[],
+    environmentAllowlist: string[] = ["RESPONSE"],
+  ) {
+    return {
+      ...input.judge,
+      harness: {
+        name: "command-judge",
+        adapter: "command" as const,
+        command: {
+          argv: [process.execPath, scriptPath, ...argv],
+          environmentAllowlist,
+        },
+      },
+    };
+  }
+
+  it("reads valid candidate and awards execution metadata without changing terminal results", async () => {
+    const root = await mkdtemp(join(tmpdir(), "local-maxima-judge-meta-valid-"));
+    const input = candidateInput(root);
+    const scriptPath = join(root, "meta-judge.mjs");
+    await writeFile(
+      scriptPath,
+      [
+        'import { writeFileSync } from "node:fs";',
+        "writeFileSync(process.argv[2], process.env.RESPONSE);",
+        `writeFileSync(process.argv[3], ${JSON.stringify(JSON.stringify(VALID_METADATA))});`,
+      ].join("\n"),
+      "utf8",
+    );
+    const judge = commandJudge(input, scriptPath, [
+      "{judgmentPath}",
+      "{executionMetadataOutputPath}",
+    ]);
+
+    const candidateResult = await new CommandJudgeAdapter({
+      environment: { RESPONSE: JSON.stringify(CANDIDATE_RESPONSE) },
+    }).scoreCandidate({ ...input, judge });
+    expect(candidateResult.status).toBe("succeeded");
+    expect(candidateResult.metadataProduced).toBe(true);
+    expect(candidateResult.executionMetadata).toEqual({
+      observedHarnessVersion: "observed-judge-harness-9.9.9",
+      observedModelVersion: "observed-judge-model-8.8.8",
+      providerRequestId: "req-judge-private-42",
+    });
+
+    const awardsRoot = await mkdtemp(join(tmpdir(), "local-maxima-judge-meta-awards-"));
+    const awardsInput = awardsInputFor(awardsRoot, input);
+    const awardsScriptPath = join(awardsRoot, "meta-awards.mjs");
+    await writeFile(
+      awardsScriptPath,
+      [
+        'import { writeFileSync } from "node:fs";',
+        "writeFileSync(process.argv[2], process.env.AWARDS);",
+        `writeFileSync(process.argv[3], ${JSON.stringify(JSON.stringify(VALID_METADATA))});`,
+      ].join("\n"),
+      "utf8",
+    );
+    const awardsJudge = commandJudge(
+      input,
+      awardsScriptPath,
+      ["{awardsPath}", "{executionMetadataOutputPath}"],
+      ["AWARDS"],
+    );
+    const awardsResult = await new CommandJudgeAdapter({
+      environment: {
+        AWARDS: JSON.stringify({
+          schemaVersion: 1,
+          generationId: input.generationId,
+          judgeId: input.judgeId,
+          awards: [],
+        }),
+      },
+    }).createAwards({ ...awardsInput, judge: awardsJudge, workspacePath: awardsRoot });
+    expect(awardsResult.status).toBe("succeeded");
+    expect(awardsResult.metadataProduced).toBe(true);
+    expect(awardsResult.executionMetadata.providerRequestId).toBe(
+      "req-judge-private-42",
+    );
+  });
+
+  it("treats missing judge execution metadata as allowed and never changes the terminal result", async () => {
+    const root = await mkdtemp(join(tmpdir(), "local-maxima-judge-meta-missing-"));
+    const input = candidateInput(root);
+    const scriptPath = join(root, "plain-judge.mjs");
+    await writeFile(
+      scriptPath,
+      [
+        'import { writeFileSync } from "node:fs";',
+        "writeFileSync(process.argv[2], process.env.RESPONSE);",
+      ].join("\n"),
+      "utf8",
+    );
+    const judge = commandJudge(input, scriptPath, ["{judgmentPath}"]);
+
+    const result = await new CommandJudgeAdapter({
+      environment: { RESPONSE: JSON.stringify(CANDIDATE_RESPONSE) },
+    }).scoreCandidate({ ...input, judge });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.attemptCount).toBe(1);
+    expect(result.error).toBeNull();
+    expect(result.metadataProduced).toBe(false);
+    expect(result.executionMetadata).toEqual({
+      observedHarnessVersion: null,
+      observedModelVersion: null,
+      providerRequestId: null,
+    });
+  });
+
+  it("bounds invalid or oversized judge metadata as incomplete without retry or crash", async () => {
+    for (const [name, body] of [
+      ["invalid", 'writeFileSync(process.argv[3], "{ not valid metadata");'],
+      [
+        "oversized",
+        'writeFileSync(process.argv[3], ""); truncateSync(process.argv[3], 2 * 1024 * 1024);',
+      ],
+    ] as const) {
+      const root = await mkdtemp(join(tmpdir(), `local-maxima-judge-meta-${name}-`));
+      const input = candidateInput(root);
+      const scriptPath = join(root, `${name}-meta-judge.mjs`);
+      await writeFile(
+        scriptPath,
+        [
+          'import { truncateSync, writeFileSync } from "node:fs";',
+          "writeFileSync(process.argv[2], process.env.RESPONSE);",
+          body,
+        ].join("\n"),
+        "utf8",
+      );
+      const judge = commandJudge(input, scriptPath, [
+        "{judgmentPath}",
+        "{executionMetadataOutputPath}",
+      ]);
+      let spawns = 0;
+      const result = await new CommandJudgeAdapter({
+        environment: { RESPONSE: JSON.stringify(CANDIDATE_RESPONSE) },
+        spawnProcess: (executable, arguments_, options) => {
+          spawns += 1;
+          return spawn(executable, arguments_, options);
+        },
+      }).scoreCandidate({ ...input, judge });
+
+      // Handled, not fatal: the judgment itself stays successful on one call.
+      expect(result.status).toBe("succeeded");
+      expect(result.attemptCount).toBe(1);
+      expect(spawns).toBe(1);
+      // Equivalent to the contestant contract: the wrapper produced a file,
+      // but the strict bounded read keeps every observed field explicitly
+      // null and notes the bounded incompleteness.
+      expect(result.metadataProduced).toBe(true);
+      expect(result.executionMetadata).toEqual({
+        observedHarnessVersion: null,
+        observedModelVersion: null,
+        providerRequestId: null,
+      });
+      expect(result.error).toMatch(/execution metadata/i);
+      expect(result.error!.length).toBeLessThan(2000);
+    }
+  });
+
+  it("writes deterministic offline fixture judge metadata for both operations", async () => {
+    const root = await mkdtemp(join(tmpdir(), "local-maxima-judge-fixture-meta-"));
+    const input = candidateInput(root);
+    await writeFile(
+      input.sanitisedCssPath,
+      ":root { --fixture-style: editorial; }",
+      "utf8",
+    );
+    const adapter = new FixtureJudgeAdapter({ delayMs: 1 });
+
+    const first = await adapter.scoreCandidate(input);
+    expect(first.status).toBe("succeeded");
+    expect(first.metadataProduced).toBe(true);
+    expect(first.executionMetadata.observedHarnessVersion).not.toBeNull();
+    expect(first.executionMetadata.observedModelVersion).not.toBeNull();
+    expect(first.executionMetadata.providerRequestId).toContain("candidate-abcd");
+    const firstBytes = await readFile(input.executionMetadataOutputPath, "utf8");
+    expect(
+      ExecutionMetadataFileSchema.parse(JSON.parse(firstBytes) as unknown),
+    ).toEqual({
+      schemaVersion: 1,
+      ...first.executionMetadata,
+    });
+    const second = await adapter.scoreCandidate(input);
+    expect(await readFile(input.executionMetadataOutputPath, "utf8")).toBe(firstBytes);
+    expect(second.executionMetadata).toEqual(first.executionMetadata);
+
+    const awardsInput = awardsInputFor(root, input);
+    const awardsResult = await adapter.createAwards(awardsInput);
+    expect(awardsResult.status).toBe("succeeded");
+    expect(awardsResult.metadataProduced).toBe(true);
+    const awardsBytes = await readFile(awardsInput.executionMetadataOutputPath, "utf8");
+    expect(
+      ExecutionMetadataFileSchema.parse(JSON.parse(awardsBytes) as unknown),
+    ).toEqual({
+      schemaVersion: 1,
+      ...awardsResult.executionMetadata,
+    });
+    const awardsAgain = await adapter.createAwards(awardsInput);
+    expect(await readFile(awardsInput.executionMetadataOutputPath, "utf8")).toBe(
+      awardsBytes,
+    );
+    expect(awardsAgain.executionMetadata).toEqual(awardsResult.executionMetadata);
   });
 });

@@ -40,6 +40,7 @@ function fixtureInput(root: string): ContestantRunInput {
     promptPath: join(root, "prompt.md"),
     submissionPath: join(root, "submission.css"),
     usageOutputPath: join(root, "usage.json"),
+    executionMetadataOutputPath: join(root, "execution-metadata.json"),
     stdoutLogPath: join(root, "stdout.log"),
     stderrLogPath: join(root, "stderr.log"),
     timeoutMs: 1000,
@@ -122,8 +123,160 @@ describe("command contestant adapter", () => {
         promptPath: "/tmp/prompt.md",
         submissionPath: "/tmp/submission.css",
         usageOutputPath: "/tmp/usage.json",
+        executionMetadataOutputPath: "/tmp/execution-metadata.json",
       }),
     ).toThrow(/placeholder/i);
+  });
+
+  it("materializes the execution metadata output path as a complete argv value", () => {
+    const argv = materializeContestantArgv(
+      ["--meta", "{executionMetadataOutputPath}", "--usage", "{usageOutputPath}"],
+      {
+        workspacePath: "/tmp/workspace",
+        challengePath: "/tmp/challenge.html",
+        starterCssPath: "/tmp/starter.css",
+        promptPath: "/tmp/prompt.md",
+        submissionPath: "/tmp/submission.css",
+        usageOutputPath: "/tmp/usage.json",
+        executionMetadataOutputPath: "/tmp/workspace/execution-metadata.json",
+      },
+    );
+    expect(argv).toEqual([
+      "--meta",
+      "/tmp/workspace/execution-metadata.json",
+      "--usage",
+      "/tmp/usage.json",
+    ]);
+  });
+
+  it("records observed versions and provider request id from a produced metadata file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "local-maxima-command-meta-"));
+    const workspacePath = join(root, "workspace");
+    await mkdir(workspacePath, { recursive: true });
+    const scriptPath = join(root, "meta-contestant.mjs");
+    await writeFile(
+      scriptPath,
+      [
+        'import { writeFileSync } from "node:fs";',
+        "writeFileSync(process.argv[2], 'body { color: green; }\\n');",
+        'writeFileSync(process.argv[3], JSON.stringify({ schemaVersion: 1, observedHarnessVersion: "observed-harness-3.2.1", observedModelVersion: "observed-model-7.0.0", providerRequestId: "req-contestant-42" }));',
+      ].join("\n"),
+      "utf8",
+    );
+    const input = fixtureInput(workspacePath);
+    const contestant = {
+      ...input.contestant,
+      harness: {
+        name: "command-harness",
+        version: "configured-harness-1",
+        adapter: "command" as const,
+        command: {
+          argv: [
+            process.execPath,
+            scriptPath,
+            "{submissionPath}",
+            "{executionMetadataOutputPath}",
+          ],
+          environmentAllowlist: [],
+        },
+      },
+    };
+
+    const result = await new CommandContestantAdapter().run({
+      ...input,
+      contestant,
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.observedVersions).toEqual({
+      harness: "observed-harness-3.2.1",
+      model: "observed-model-7.0.0",
+    });
+    expect(result.executionMetadata).toEqual({
+      observedHarnessVersion: "observed-harness-3.2.1",
+      observedModelVersion: "observed-model-7.0.0",
+      providerRequestId: "req-contestant-42",
+    });
+    expect(result.metadataProduced).toBe(true);
+    expect(result.error).toBeNull();
+  });
+
+  it("reports null observed versions and incomplete metadata when no file is produced", async () => {
+    const root = await mkdtemp(join(tmpdir(), "local-maxima-command-nometa-"));
+    const workspacePath = join(root, "workspace");
+    await mkdir(workspacePath, { recursive: true });
+    const scriptPath = join(root, "plain-contestant.mjs");
+    await writeFile(
+      scriptPath,
+      'import { writeFileSync } from "node:fs"; writeFileSync(process.argv[2], "body {}\\n");',
+      "utf8",
+    );
+    const input = fixtureInput(workspacePath);
+    const contestant = {
+      ...input.contestant,
+      harness: {
+        name: "command-harness",
+        version: "configured-harness-1",
+        adapter: "command" as const,
+        command: {
+          argv: [process.execPath, scriptPath, "{submissionPath}"],
+          environmentAllowlist: [],
+        },
+      },
+    };
+
+    const result = await new CommandContestantAdapter().run({ ...input, contestant });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.observedVersions).toEqual({ harness: null, model: null });
+    expect(result.executionMetadata).toEqual({
+      observedHarnessVersion: null,
+      observedModelVersion: null,
+      providerRequestId: null,
+    });
+    expect(result.metadataProduced).toBe(false);
+    expect(result.error).toBeNull();
+  });
+
+  it("notes an invalid metadata file without changing the run status", async () => {
+    const root = await mkdtemp(join(tmpdir(), "local-maxima-command-badmeta-"));
+    const workspacePath = join(root, "workspace");
+    await mkdir(workspacePath, { recursive: true });
+    const scriptPath = join(root, "badmeta-contestant.mjs");
+    await writeFile(
+      scriptPath,
+      [
+        'import { writeFileSync } from "node:fs";',
+        "writeFileSync(process.argv[2], 'body {}\\n');",
+        'writeFileSync(process.argv[3], "{ this is not valid metadata");',
+      ].join("\n"),
+      "utf8",
+    );
+    const input = fixtureInput(workspacePath);
+    const contestant = {
+      ...input.contestant,
+      harness: {
+        name: "command-harness",
+        version: "configured-harness-1",
+        adapter: "command" as const,
+        command: {
+          argv: [
+            process.execPath,
+            scriptPath,
+            "{submissionPath}",
+            "{executionMetadataOutputPath}",
+          ],
+          environmentAllowlist: [],
+        },
+      },
+    };
+
+    const result = await new CommandContestantAdapter().run({ ...input, contestant });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.metadataProduced).toBe(true);
+    expect(result.observedVersions).toEqual({ harness: null, model: null });
+    expect(result.error).toMatch(/execution metadata/i);
   });
 
   it("materializes complete placeholders and passes only the explicit environment", async () => {
