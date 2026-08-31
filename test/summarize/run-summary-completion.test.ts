@@ -127,6 +127,14 @@ describe("run-summary normal completion wiring", () => {
       expect(file).not.toContain(RUN_SUMMARY_FILE_NAME);
       expect(file).not.toContain("execution-metadata");
     }
+    const publicHtml = await readFile(
+      join(generationPath, "public/index.html"),
+      "utf8",
+    );
+    expect(publicHtml).toContain("Runtime");
+    expect(publicHtml).toContain("Estimated cost");
+    expect(publicHtml).toContain("—");
+    expect(publicHtml).not.toContain("partial");
     // The private metadata really exists inside the generation, so the
     // public absence above is a privacy result and not a missing-artifact
     // accident.

@@ -20,8 +20,13 @@ import {
   buildArchivedSeasonDefinition,
   buildChallengePage,
   GALLERY_SOURCE_ARCHIVE_FILE,
+  publicFailureMessage,
 } from "../challenge/index.js";
 import type { PageAward, PageEntry } from "../challenge/data.js";
+import {
+  loadGalleryPresentation,
+  validateLeaderboardIntegrity,
+} from "./presentation.js";
 import {
   ChallengeConfigSchema,
   ContestantsConfigSchema,
@@ -325,6 +330,7 @@ async function verifyLeaderboardArtifacts(
   manifest: z.infer<typeof ManifestSchema>,
   leaderboard: Leaderboard,
 ): Promise<void> {
+  validateLeaderboardIntegrity(leaderboard);
   if (leaderboard.expectedJudgeCount !== manifest.judgeIds.length) {
     throw new Error("leaderboard expected judge count does not match the manifest");
   }
@@ -500,6 +506,10 @@ async function chooseStylesheet(
 function pageEntries(
   leaderboard: Leaderboard,
   judgeNames: ReadonlyMap<string, string>,
+  operationalLabelsByContestant: ReadonlyMap<
+    string,
+    { readonly runtimeLabel: string; readonly estimatedCostLabel: string }
+  >,
   screenshotPaths: readonly string[],
   statusLabels: GalleryStaticCopy["statusLabels"],
 ): PageEntry[] {
@@ -520,6 +530,10 @@ function pageEntries(
     originalityScoreLabel: scoreLabel(entry.originalityScore),
     completedJudgeCount: entry.completedJudgeCount,
     expectedJudgeCount: entry.expectedJudgeCount,
+    runtimeLabel:
+      operationalLabelsByContestant.get(entry.contestantId)?.runtimeLabel ?? "—",
+    estimatedCostLabel:
+      operationalLabelsByContestant.get(entry.contestantId)?.estimatedCostLabel ?? "—",
     dimensionMeanLabels: formatDimensionMeanLabels(entry.dimensionMeans),
     judgeScores: entry.judgeScores.map((score) => ({
       judgeId: score.judgeId,
@@ -540,7 +554,7 @@ function pageEntries(
         : { candidateRank: score.candidateRank }),
     })),
     awards: entry.awards.map((award) => ({ label: award.label })),
-    failure: entry.failure,
+    failure: publicFailureMessage(entry.status),
   }));
 }
 
@@ -628,6 +642,12 @@ export async function buildGallery(
     generationPath,
     manifest,
   );
+  const presentation = await loadGalleryPresentation({
+    generationPath,
+    manifest,
+    leaderboard,
+    judgesConfig,
+  });
   const challengeRoot = join(generationPath, "challenge");
   const definition = buildArchivedSeasonDefinition({
     rootPath: challengeRoot,
@@ -707,9 +727,11 @@ export async function buildGallery(
         entries: pageEntries(
           leaderboard,
           judgeNames,
+          presentation.operationalLabelsByContestant,
           screenshotPaths,
           definition.staticCopy.statusLabels,
         ),
+        judgeMatrix: presentation.judgeMatrix,
         awards: pageAwards(leaderboard, judgeNames),
       });
       if (

@@ -35,6 +35,7 @@ import {
   GallerySourceArchiveSchema,
   GenerationIdSchema,
   IdentitySchema,
+  JudgesConfigSchema,
   LeaderboardSchema,
   ManifestSchema,
   ProfileJsonSchema,
@@ -44,10 +45,12 @@ import {
   SeasonIdSchema,
   UtcTimestampSchema,
   readJsonWithSchema,
+  readYamlWithSchema,
   type ContestantConfig,
   type ContestantsConfig,
   type Leaderboard,
 } from "../schemas/index.js";
+import { loadGalleryPresentation } from "../gallery/presentation.js";
 import { resolveProfile } from "../config/profiles.js";
 import { buildRunPlan } from "../planning/index.js";
 import { runRepositoryPreflight } from "../preflight/index.js";
@@ -207,6 +210,9 @@ interface SnapshotInputHashesInput {
   readonly previousGenerationId: string | null;
   readonly previousGenerationPath: string | null;
   readonly previousLeaderboard: Leaderboard | null;
+  readonly previousPresentation: Awaited<
+    ReturnType<typeof loadGalleryPresentation>
+  > | null;
 }
 
 async function buildSnapshotInputHashes(
@@ -259,6 +265,14 @@ async function buildSnapshotInputHashes(
         sources.set(
           posixPath(join(previousPrefix, entry.screenshotPath)),
           resolve(input.previousGenerationPath, entry.screenshotPath),
+        );
+      }
+    }
+    if (input.previousPresentation !== null) {
+      for (const sourceFile of input.previousPresentation.sourceFiles) {
+        sources.set(
+          posixPath(join(previousPrefix, sourceFile)),
+          join(input.previousGenerationPath, ...sourceFile.split("/")),
         );
       }
     }
@@ -691,11 +705,14 @@ export async function createGeneration(
   }[] = [];
   let previousGenerationPath: string | null = null;
   let previousLeaderboard: Leaderboard | null = null;
+  let previousPresentation: Awaited<ReturnType<typeof loadGalleryPresentation>> | null =
+    null;
   if (previousGenerationId === null) {
     page = await buildSeedChallengePage({
       definition,
       generationId,
       rosterSize: enabledContestants.length,
+      judgeCount: enabledJudges.length,
       stylesheetPath: "submission.css",
       generatedAt: timestamp,
     });
@@ -746,6 +763,16 @@ export async function createGeneration(
       LeaderboardSchema,
     );
     previousLeaderboard = currentPreviousLeaderboard;
+    const previousJudgesConfig = await readYamlWithSchema(
+      join(currentPreviousGenerationPath, "config/judges.yaml"),
+      JudgesConfigSchema,
+    );
+    previousPresentation = await loadGalleryPresentation({
+      generationPath: currentPreviousGenerationPath,
+      manifest: previousManifest,
+      leaderboard: currentPreviousLeaderboard,
+      judgesConfig: previousJudgesConfig,
+    });
     const previousManifestContestantIds = new Set(previousManifest.contestantIds);
     if (
       currentPreviousLeaderboard.seasonId !== seasonId ||
@@ -767,6 +794,7 @@ export async function createGeneration(
       generatedAt: timestamp,
       leaderboard: currentPreviousLeaderboard,
       previousGenerationPath: currentPreviousGenerationPath,
+      presentation: previousPresentation,
     });
     page = previousPage;
     previousScreenshotSources = previousPage.screenshotSources;
@@ -919,6 +947,7 @@ export async function createGeneration(
       previousGenerationId,
       previousGenerationPath,
       previousLeaderboard,
+      previousPresentation,
     });
     const snapshot = {
       schemaVersion: 1 as const,

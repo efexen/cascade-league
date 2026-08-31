@@ -92,6 +92,8 @@
                     <div><dt>Originality</dt><dd>{{originalityScoreLabel}}</dd></div>
                     <div><dt>Judges</dt><dd>{{completedJudgeCount}} / {{expectedJudgeCount}}</dd></div>
                     <div><dt>Status</dt><dd>{{statusLabel}}</dd></div>
+                    <div class="entry-runtime entry-operational" data-operational="runtime"><dt>Runtime</dt><dd>{{runtimeLabel}}</dd></div>
+                    <div class="entry-estimated-cost entry-cost entry-operational" data-operational="estimated-cost"><dt>Estimated cost</dt><dd>{{estimatedCostLabel}}</dd></div>
                   </dl>
                   {{#if dimensionMeanLabels}}
                     <dl class="entry-scores entry-dimension-means">
@@ -160,6 +162,31 @@
             <p class="section-kicker">The jury</p>
             <h2 id="judge-notes-title" class="section-title">Judge notes</h2>
           </header>
+          <table class="judge-matrix">
+            <caption>Judge score matrix</caption>
+            <thead>
+              <tr>
+                <th scope="col">Contestant</th>
+                {{#each judgeMatrix.columns}}
+                  <th scope="col">{{displayName}}</th>
+                {{/each}}
+                <th scope="col">Combined</th>
+                <th scope="col">Range</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{#each judgeMatrix.rows}}
+                <tr class="judge-matrix-row" data-contestant-id="{{contestantId}}">
+                  <th scope="row">{{rowHeader}}</th>
+                  {{#each cells}}
+                    <td class="judge-matrix-cell" data-status="{{state}}">{{label}}</td>
+                  {{/each}}
+                  <td class="judge-matrix-cell judge-matrix-combined">{{combinedScoreLabel}}</td>
+                  <td class="judge-matrix-cell judge-matrix-range">{{scoreRangeLabel}}</td>
+                </tr>
+              {{/each}}
+            </tbody>
+          </table>
           {{#each entries}}
             <article id="entry-detail-{{id}}" class="entry-detail">
               <header class="entry-detail-header">

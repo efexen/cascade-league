@@ -220,6 +220,52 @@ body {
   font-size: 16px;
 }
 
+.entry-runtime,
+.entry-estimated-cost {
+  min-width: 0;
+}
+
+.judge-matrix {
+  border-collapse: collapse;
+  margin-top: 24px;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.judge-matrix caption {
+  font-family: "LM Mono", monospace;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  margin-bottom: 10px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.judge-matrix th,
+.judge-matrix td {
+  border: 1px solid currentColor;
+  overflow-wrap: anywhere;
+  padding: 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.judge-matrix th[scope="col"] {
+  font-family: "LM Mono", monospace;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.judge-matrix th[scope="row"] {
+  font-weight: 400;
+}
+
+.judge-matrix-combined,
+.judge-matrix-range {
+  font-weight: 700;
+}
+
 .entry-awards {
   display: flex;
   flex-wrap: wrap;

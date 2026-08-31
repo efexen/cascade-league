@@ -1,7 +1,7 @@
 schemaVersion: 1
 seasonId: "0001"
 title: Local Maxima
-challengeVersion: "1.0.0"
+challengeVersion: "1.1.0"
 template: challenge.hbs
 starterCss: starter.css
 fallbackCss: fallback.css

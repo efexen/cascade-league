@@ -26,6 +26,7 @@ import {
   readYamlWithSchema,
 } from "../../src/schemas/index.js";
 import { createGeneration } from "../../src/artifacts/generation.js";
+import { runGeneration } from "../../src/orchestration/generation.js";
 
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
 const timestamp = "2026-08-27T20:00:00.000Z";
@@ -111,7 +112,14 @@ async function createCompletedFirstGeneration(
         originalityScore: 15 - index,
         completedJudgeCount: 1,
         expectedJudgeCount: 1,
-        judgeScores: [],
+        judgeScores: [
+          {
+            judgeId: "fixture-critic-a",
+            totalScore: 80 - index,
+            originalityScore: 15 - index,
+            critique: "A durable fixture score.",
+          },
+        ],
         awards: [],
         failure: null,
       };
@@ -146,7 +154,119 @@ async function copyRepositoryForTest(): Promise<string> {
   return copy;
 }
 
+function tableMarkup(html: string): string {
+  const start = html.indexOf('<table class="judge-matrix">');
+  const end = html.indexOf("</table>", start);
+  if (start < 0 || end < 0) throw new Error("judge matrix table is missing");
+  return html.slice(start, end + "</table>".length);
+}
+
 describe("immutable generation creation", () => {
+  it("uses the previous generation actual judge matrix and hashes every presentation input", async () => {
+    const generationsRoot = await mkdtemp(
+      join(tmpdir(), "local-maxima-generations-presentation-"),
+    );
+    const first = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      profileId: "fixture",
+      generationId: "0001",
+      now: timestamp,
+    });
+    const completed = await runGeneration({
+      repositoryRoot,
+      generationPath: first.generationPath,
+      generatedAt: "2026-08-27T20:15:00.000Z",
+    });
+    const second = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      profileId: "fixture",
+      generationId: "0002",
+      now: "2026-08-28T20:00:00.000Z",
+    });
+
+    const firstPublicHtml = await readFile(
+      join(completed.gallery.publicPath, "index.html"),
+      "utf8",
+    );
+    const secondChallengeHtml = await readFile(
+      join(second.generationPath, "challenge/challenge.html"),
+      "utf8",
+    );
+    expect(tableMarkup(secondChallengeHtml)).toBe(tableMarkup(firstPublicHtml));
+
+    const firstManifest = ManifestSchema.parse(
+      JSON.parse(
+        await readFile(join(first.generationPath, "manifest.json"), "utf8"),
+      ) as unknown,
+    );
+    for (const contestantId of firstManifest.contestantIds) {
+      const run = RunSchema.parse(
+        JSON.parse(
+          await readFile(
+            join(first.generationPath, `contestants/${contestantId}/run.json`),
+            "utf8",
+          ),
+        ) as unknown,
+      );
+      expect(secondChallengeHtml).toContain(
+        run.durationMs === null
+          ? "Runtime</dt><dd>—"
+          : `Runtime</dt><dd>${(run.durationMs / 1000).toFixed(2)} s`,
+      );
+      expect(secondChallengeHtml).toContain(
+        run.usage.estimatedCostUsd === null
+          ? "Estimated cost</dt><dd>—"
+          : `Estimated cost</dt><dd>USD ${run.usage.estimatedCostUsd.toFixed(6)}`,
+      );
+    }
+
+    const secondSnapshot = SnapshotSchema.parse(
+      JSON.parse(
+        await readFile(join(second.generationPath, "challenge/snapshot.json"), "utf8"),
+      ) as unknown,
+    );
+    const expectedPrivatePaths = [
+      "config/judges.yaml",
+      "judging/anonymous-map.json",
+      ...firstManifest.contestantIds.map(
+        (contestantId) => `contestants/${contestantId}/run.json`,
+      ),
+    ];
+    const firstMap = AnonymousMapSchema.parse(
+      JSON.parse(
+        await readFile(
+          join(first.generationPath, "judging/anonymous-map.json"),
+          "utf8",
+        ),
+      ) as unknown,
+    );
+    for (const judgeId of firstManifest.judgeIds) {
+      for (const entry of firstMap.entries) {
+        expectedPrivatePaths.push(
+          `judging/${judgeId}/tasks/${entry.anonymousCandidateId}.json`,
+        );
+      }
+    }
+    for (const relativePath of expectedPrivatePaths) {
+      expect(secondSnapshot.inputHashes[`generations/0001/${relativePath}`]).toBe(
+        await sha256(join(first.generationPath, relativePath)),
+      );
+    }
+
+    expect(
+      await sharp(
+        join(
+          second.generationPath,
+          "challenge/thumbnails/previous-fixture-editorial.png",
+        ),
+      ).metadata(),
+    ).toMatchObject({ width: 360, height: 300 });
+  }, 30000);
+
   it("writes config/profile.json, hashes it, and copies profile sources verbatim", async () => {
     const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
     const result = await createGeneration({
@@ -756,7 +876,14 @@ describe("immutable generation creation", () => {
           originalityScore: 15 - index,
           completedJudgeCount: 1,
           expectedJudgeCount: 1,
-          judgeScores: [],
+          judgeScores: [
+            {
+              judgeId: "fixture-critic-a",
+              totalScore: 80 - index,
+              originalityScore: 15 - index,
+              critique: "A durable fixture score.",
+            },
+          ],
           awards: [],
           failure: null,
         };

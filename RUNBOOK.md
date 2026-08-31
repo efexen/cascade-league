@@ -1,4 +1,4 @@
-# Phase 1 operator runbook
+# Phase 2 operator runbook
 
 1. Install with `pnpm install --frozen-lockfile`, install Chromium with
    `pnpm exec playwright install chromium`, and run
@@ -13,7 +13,12 @@
    artifacts.
 3. Open `public/index.html` or use `pnpm garden serve-gallery --generation-path
 /absolute/path/to/generation`. The server prints a loopback URL; stop it
-   with Ctrl-C and check that the process exits.
+   with Ctrl-C and check that the process exits. Confirm every card contains
+   Runtime and Estimated cost labels (`—` means unknown), and that Judge notes
+   begins with an accessible matrix before the prose critiques. Check that its
+   rows follow `leaderboard.entries`, its judge columns follow copied config
+   order, and its Combined/Range values match `leaderboard.json` verbatim to
+   two decimals.
 4. For a real run, copy `config/profiles/real.example/` to
    `config/profiles/real.local/` (git-ignored), replace every placeholder
    executable path and credential variable name, and confirm
@@ -58,7 +63,10 @@
    zero, and any aggregate labelled `"partial"` means at least one relevant call
    lacked usage or cost. Provider request IDs, detailed usage, prompts, logs,
    command paths, environment names, credentials, and judge costs stay private
-   and are never copied into `public/`.
+   and are never copied into `public/`. Per-contestant runtime and estimated
+   cost labels, matrix scores, and fixed public status labels are the only
+   newly authorized operational values in the gallery; judge costs and raw
+   usage remain private.
 
 Do not publish `anonymous-map.json`, `logs/`, `raw/`, prompts, usage, private
 workspaces, competitor CSS, `run-summary.json`, `run-plan.json`, or the private

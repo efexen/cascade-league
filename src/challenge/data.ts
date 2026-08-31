@@ -25,6 +25,81 @@ const DisplayAggregateLabelSchema = z.union([
   z.string().regex(/^\d+\.\d{2}$/u, "aggregate display values must use two decimals"),
 ]);
 
+const RuntimeLabelSchema = z.union([
+  z.literal("—"),
+  z
+    .string()
+    .regex(/^\d+\.\d{2} s$/u, "runtime labels must use two decimals and seconds"),
+]);
+
+const EstimatedCostLabelSchema = z.union([
+  z.literal("—"),
+  z
+    .string()
+    .regex(/^USD \d+\.\d{6}$/u, "estimated cost labels must use six USD decimals"),
+]);
+
+export const JudgeMatrixCellStateSchema = z.enum([
+  "score",
+  "missing",
+  "invalid",
+  "timed_out",
+  "placeholder",
+]);
+
+export const JudgeMatrixCellSchema = z
+  .object({
+    judgeId: z.union([JudgeIdSchema, z.null()]),
+    state: JudgeMatrixCellStateSchema,
+    label: TextSchema(100),
+  })
+  .strict();
+
+export const JudgeMatrixColumnSchema = z
+  .object({
+    judgeId: z.union([JudgeIdSchema, z.null()]),
+    displayName: TextSchema(200),
+  })
+  .strict();
+
+export const JudgeMatrixRowSchema = z
+  .object({
+    contestantId: SlugSchema,
+    rowHeader: TextSchema(400),
+    cells: z.array(JudgeMatrixCellSchema),
+    combinedScoreLabel: DisplayAggregateLabelSchema,
+    scoreRangeLabel: DisplayAggregateLabelSchema,
+  })
+  .strict();
+
+export const JudgeMatrixSchema = z
+  .object({
+    columns: z.array(JudgeMatrixColumnSchema),
+    rows: z.array(JudgeMatrixRowSchema).min(1),
+  })
+  .strict()
+  .superRefine((matrix, context) => {
+    matrix.rows.forEach((row, rowIndex) => {
+      if (row.cells.length !== matrix.columns.length) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["rows", rowIndex, "cells"],
+          message: "matrix row cells must align one-for-one with configured columns",
+        });
+      }
+      row.cells.forEach((cell, cellIndex) => {
+        const column = matrix.columns[cellIndex];
+        if (column !== undefined && cell.judgeId !== column.judgeId) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["rows", rowIndex, "cells", cellIndex, "judgeId"],
+            message: "matrix cell judge must align with its configured column",
+          });
+        }
+      });
+    });
+  });
+
 export const DimensionMeanLabelsSchema = z
   .object({
     hierarchyAndReadability: z.string().regex(/^\d+\.\d{2}$/u),
@@ -116,6 +191,8 @@ const PageEntrySchema = z
     originalityScoreLabel: DisplayAggregateLabelSchema,
     completedJudgeCount: z.number().int().nonnegative(),
     expectedJudgeCount: z.number().int().nonnegative(),
+    runtimeLabel: RuntimeLabelSchema,
+    estimatedCostLabel: EstimatedCostLabelSchema,
     dimensionMeanLabels: DimensionMeanLabelsSchema.nullable().optional(),
     judgeScores: z.array(JudgeNoteSchema),
     awards: z.array(
@@ -144,6 +221,7 @@ export const ChallengePageDataSchema = z
     centralQuestion: TextSchema(500),
     rules: z.array(TextSchema(300)).length(5),
     entries: z.array(PageEntrySchema).min(1),
+    judgeMatrix: JudgeMatrixSchema,
     awards: z.array(PageAwardSchema).max(3 * 6),
     method: TextSchema(1000),
     generationTimestamp: TextSchema(100),
@@ -159,3 +237,4 @@ export type ChallengePageData = z.infer<typeof ChallengePageDataSchema>;
 export type PageEntry = ChallengePageData["entries"][number];
 export type PageAward = ChallengePageData["awards"][number];
 export type DimensionMeanLabels = z.infer<typeof DimensionMeanLabelsSchema>;
+export type JudgeMatrix = z.infer<typeof JudgeMatrixSchema>;

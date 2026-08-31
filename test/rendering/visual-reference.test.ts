@@ -31,6 +31,7 @@ describe("static gallery visual reference", () => {
       repositoryRoot,
       generationPath: generation.generationPath,
       generatedAt,
+      clock: () => new Date(generatedAt),
     });
     const actualPath = result.gallery.screenshotPath;
     const [actual, reference] = await Promise.all([

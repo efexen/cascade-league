@@ -9,6 +9,7 @@ import {
   loadSeasonDefinition,
   SeedGenerationSchema,
 } from "../../src/challenge/index.js";
+import { JudgeMatrixSchema } from "../../src/challenge/data.js";
 
 const seasonRoot = new URL("../../challenge/season-001/", import.meta.url);
 
@@ -19,6 +20,7 @@ describe("Season 1 challenge", () => {
       definition,
       generationId: "0001",
       rosterSize: 3,
+      judgeCount: 2,
       stylesheetPath: "submission.css",
       generatedAt: "2026-08-27T20:00:00.000Z",
     });
@@ -35,6 +37,7 @@ describe("Season 1 challenge", () => {
       definition,
       generationId: "0001",
       rosterSize: 3,
+      judgeCount: 2,
       stylesheetPath: "submission.css",
       generatedAt: "2026-08-27T20:00:00.000Z",
     });
@@ -60,6 +63,7 @@ describe("Season 1 challenge", () => {
       definition,
       generationId: "0001",
       rosterSize: 3,
+      judgeCount: 2,
       stylesheetPath: "submission.css",
       generatedAt: "2026-08-27T20:00:00.000Z",
     });
@@ -81,6 +85,20 @@ describe("Season 1 challenge", () => {
       expect(page.html).toContain(selector);
     }
     expect((page.html.match(/class="entry-card"/g) ?? []).length).toBe(3);
+    expect((page.html.match(/class="judge-matrix-row"/g) ?? []).length).toBe(3);
+    expect((page.html.match(/class="judge-matrix-cell(?:\s|")/g) ?? []).length).toBe(
+      12,
+    );
+    expect(page.html).toContain('<table class="judge-matrix">');
+    expect(page.html).toContain('<th scope="col">Judge 1</th>');
+    expect(page.html).toContain('<th scope="col">Judge 2</th>');
+    expect(page.html).toContain('<th scope="col">Combined</th>');
+    expect(page.html).toContain('<th scope="col">Range</th>');
+    expect((page.html.match(/class="entry-runtime/g) ?? []).length).toBe(3);
+    expect((page.html.match(/class="entry-estimated-cost/g) ?? []).length).toBe(3);
+    expect((page.html.match(/>—</g) ?? []).length).toBeGreaterThanOrEqual(15);
+    expect(page.html).toContain('scope="row"');
+    expect(page.html).toContain('data-status="placeholder"');
     expect(page.html).toContain("Every contestant receives the same HTML.");
     expect(page.html).toContain("divergence, convergence, or judge gaming");
     expect(page.html).not.toMatch(/<script\b/i);
@@ -93,6 +111,7 @@ describe("Season 1 challenge", () => {
       definition,
       generationId: "0001",
       rosterSize: 6,
+      judgeCount: 2,
       stylesheetPath: "submission.css",
       generatedAt: "2026-08-27T20:00:00.000Z",
     });
@@ -131,6 +150,7 @@ describe("Season 1 challenge", () => {
         definition,
         generationId: "0001",
         rosterSize: 1,
+        judgeCount: 2,
         stylesheetPath: "submission.css",
         generatedAt: "2026-08-27T20:00:00.000Z",
       }),
@@ -140,6 +160,7 @@ describe("Season 1 challenge", () => {
         definition,
         generationId: "0001",
         rosterSize: 7,
+        judgeCount: 2,
         stylesheetPath: "submission.css",
         generatedAt: "2026-08-27T20:00:00.000Z",
       }),
@@ -156,5 +177,25 @@ describe("Season 1 challenge", () => {
         ),
       }),
     ).toThrow();
+  });
+
+  it("rejects judge matrix rows whose cells do not align with configured columns", () => {
+    expect(() =>
+      JudgeMatrixSchema.parse({
+        columns: [
+          { judgeId: "judge-alpha", displayName: "Judge Alpha" },
+          { judgeId: "judge-beta", displayName: "Judge Beta" },
+        ],
+        rows: [
+          {
+            contestantId: "contestant-alpha",
+            rowHeader: "1 · Contestant Alpha",
+            cells: [{ judgeId: "judge-beta", state: "score", label: "80" }],
+            combinedScoreLabel: "80.00",
+            scoreRangeLabel: "0.00",
+          },
+        ],
+      }),
+    ).toThrow(/align|column|cell/i);
   });
 });

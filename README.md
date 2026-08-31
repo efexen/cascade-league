@@ -2,8 +2,9 @@
 
 Local Maxima is a CSS-only design tournament. Phase 1 runs contestants once,
 validates and renders their submissions, judges anonymous screenshots, produces
-a deterministic leaderboard, and builds a static gallery. It has no database,
-scheduler, client-side application, or hosted service.
+a deterministic leaderboard, and builds a static gallery. Phase 2 adds
+repeatable run controls, private operational summaries, and a public judge
+matrix without adding a database, client-side application, or hosted service.
 
 ## Prerequisites
 
@@ -243,11 +244,28 @@ so a configured version is never reported as something that actually ran.
 Missing, oversized, or invalid metadata keeps the observed identity unknown
 without changing any terminal task status.
 
-Privacy: provider request IDs, detailed usage, estimated costs, command
-paths, prompts, environment variable names, credentials, logs, and judge
-costs remain private. The summary itself is private, and neither it nor any
-execution-metadata file is ever copied into `public/`; public output carries
-only the existing allowlisted gallery bytes.
+Privacy: provider request IDs, detailed usage, command paths, prompts,
+environment variable names, credentials, logs, and judge usage/costs remain
+private. The public gallery may show only the derived per-contestant runtime
+and estimated-cost labels described below. The summary itself is private, and
+neither it nor any execution-metadata file is ever copied into `public/`.
+
+## Gallery projection (Season 1 challenge version 1.1.0)
+
+Each contestant card shows the single contestant execution duration as
+`0.00 s` and the derived estimated contestant cost as `USD 0.000000`. A known
+zero is preserved; an unavailable value is shown as `—`. The current durable
+artifacts do not prove partial completeness, so the gallery never adds a
+`partial` marker. Token counts, request IDs, command paths, environment names,
+prompts, logs, raw errors, and judge costs remain private.
+
+The Judge notes section starts with an accessible, no-JavaScript score matrix.
+Rows use the exact `leaderboard.entries` order; columns use the copied enabled
+judge configuration order. Valid scores, `Missing`, `Invalid`, and `Timed out`
+are distinct cell values, while Combined and Range display the existing
+leaderboard fields without recalculation. Generation 1 uses neutral `Judge 1`
+through `Judge N` placeholders. Later generation challenge snapshots use the
+previous completed generation's actual public matrix and operational labels.
 
 ## Real command adapters
 
@@ -280,8 +298,9 @@ those values in private stdout/stderr logs. A wrapper may additionally write a
 strict, bounded `execution-metadata.json` at `{executionMetadataOutputPath}`
 recording the observed harness/model versions and a private provider request
 ID; it is archived privately under the generation and never published. Never
-put a secret, prompt, raw
-model response, or usage/cost value in a public template or public metadata.
+put a secret, prompt, raw model response, raw usage/cost fields, judge usage or
+cost, or private metadata in a public template or public metadata; only the
+derived contestant labels above are public.
 
 ## Artifacts and inspection
 
@@ -294,7 +313,8 @@ under `judging/`, private logs under `logs/`, derived `leaderboard.json` and
 map, raw judge output, prompts, workspaces,
 usage, logs, and competitor CSS remain private. Public output contains only
 `index.html`, `metadata.json`, `champion.css`, neutral filenames for
-screenshots, local fonts, and `gallery-screenshot.png`.
+screenshots, local fonts, and `gallery-screenshot.png`. The public HTML also
+contains the derived contestant operational labels and judge score matrix.
 
 Useful checks:
 

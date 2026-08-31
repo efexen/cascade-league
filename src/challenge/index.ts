@@ -25,6 +25,8 @@ import {
   type SeedGeneration,
   type DimensionMeanLabels,
 } from "./data.js";
+import type { GalleryPresentation } from "../gallery/presentation.js";
+import type { JudgeMatrix } from "../gallery/presentation.js";
 
 const STATIC_COPY: GalleryStaticCopy = GalleryStaticCopySchema.parse({
   descriptor: "A recurring CSS design tournament for AI agents",
@@ -82,6 +84,7 @@ export interface BuildSeedChallengePageInput {
   readonly definition: SeasonDefinition;
   readonly generationId: string;
   readonly rosterSize: number;
+  readonly judgeCount: number;
   readonly stylesheetPath: string;
   readonly generatedAt: string;
 }
@@ -93,6 +96,7 @@ export interface BuildChallengePageInput {
   readonly generatedAt: string;
   readonly statusBadge: string;
   readonly entries: readonly PageEntry[];
+  readonly judgeMatrix: JudgeMatrix;
   readonly awards: readonly PageAward[];
 }
 
@@ -109,6 +113,7 @@ export interface BuildPreviousChallengePageInput {
   readonly generatedAt: string;
   readonly leaderboard: Leaderboard;
   readonly previousGenerationPath: string;
+  readonly presentation: GalleryPresentation;
 }
 
 export interface PreviousChallengePage extends ChallengePage {
@@ -181,6 +186,8 @@ function pageEntryFromSeed(entry: SeedEntry, staticCopy: GalleryStaticCopy): Pag
     originalityScoreLabel: "—",
     completedJudgeCount: 0,
     expectedJudgeCount: 0,
+    runtimeLabel: "—",
+    estimatedCostLabel: "—",
     dimensionMeanLabels: null,
     judgeScores: [],
     awards: [],
@@ -188,8 +195,8 @@ function pageEntryFromSeed(entry: SeedEntry, staticCopy: GalleryStaticCopy): Pag
   };
 }
 
-function scoreLabel(score: number | null): string {
-  return score === null ? "—" : score.toFixed(2);
+function scoreLabel(score: number | null | undefined): string {
+  return score === null || score === undefined ? "—" : score.toFixed(2);
 }
 
 export function formatDimensionMeanLabels(
@@ -217,6 +224,24 @@ function statusLabel(
   return labels[status];
 }
 
+export function publicFailureMessage(status: PageEntry["status"]): string | null {
+  switch (status) {
+    case "invalid":
+      return "This submission did not pass stylesheet validation.";
+    case "timeout":
+      return "This contestant timed out before producing a usable submission.";
+    case "render_failed":
+      return "This submission could not be rendered for judging.";
+    case "execution_failed":
+      return "This contestant did not produce a usable submission.";
+    case "judge_incomplete":
+      return "Some judge results were unavailable for this contestant.";
+    case "valid":
+    case "seed":
+      return null;
+  }
+}
+
 function createPageData(
   definition: SeasonDefinition,
   input: Pick<
@@ -224,9 +249,17 @@ function createPageData(
     "generationId" | "stylesheetPath" | "generatedAt"
   >,
   entries: readonly PageEntry[],
+  judgeMatrix: JudgeMatrix,
   awards: readonly PageAward[],
   badge: string,
 ): ChallengePageData {
+  const pageJudgeMatrix = {
+    columns: judgeMatrix.columns.map((column) => ({ ...column })),
+    rows: judgeMatrix.rows.map((row) => ({
+      ...row,
+      cells: row.cells.map((cell) => ({ ...cell })),
+    })),
+  };
   return ChallengePageDataSchema.parse({
     schemaVersion: 1,
     seasonId: definition.config.seasonId,
@@ -241,6 +274,7 @@ function createPageData(
     centralQuestion: definition.staticCopy.centralQuestion,
     rules: [...definition.staticCopy.rules],
     entries,
+    judgeMatrix: pageJudgeMatrix,
     awards,
     method: definition.staticCopy.method,
     generationTimestamp: input.generatedAt,
@@ -265,6 +299,7 @@ export async function buildChallengePage(
     input.definition,
     input,
     input.entries,
+    input.judgeMatrix,
     input.awards,
     input.statusBadge,
   );
@@ -285,10 +320,31 @@ export async function buildSeedChallengePage(
   ) {
     throw new Error("Season 1 roster must contain between two and six contestants");
   }
+  if (!Number.isInteger(input.judgeCount) || input.judgeCount < 1) {
+    throw new Error("challenge judge count must be a positive integer");
+  }
 
   const entries = input.definition.seed.entries
     .slice(0, input.rosterSize)
     .map((entry) => pageEntryFromSeed(entry, input.definition.staticCopy));
+  const columns = Array.from({ length: input.judgeCount }, (_, index) => ({
+    judgeId: null,
+    displayName: `Judge ${index + 1}`,
+  }));
+  const judgeMatrix: JudgeMatrix = {
+    columns,
+    rows: entries.map((entry, index) => ({
+      contestantId: entry.id,
+      rowHeader: `${index + 1} · Seed entry`,
+      cells: columns.map(() => ({
+        judgeId: null,
+        state: "placeholder" as const,
+        label: "—",
+      })),
+      combinedScoreLabel: "—",
+      scoreRangeLabel: "—",
+    })),
+  };
   return buildChallengePage({
     definition: input.definition,
     generationId: input.generationId,
@@ -296,6 +352,7 @@ export async function buildSeedChallengePage(
     generatedAt: input.generatedAt,
     statusBadge: "Seed field · awaiting first run",
     entries,
+    judgeMatrix,
     awards: [],
   });
 }
@@ -333,10 +390,17 @@ export async function buildPreviousChallengePage(
       originalityScoreLabel: scoreLabel(entry.originalityScore),
       completedJudgeCount: entry.completedJudgeCount,
       expectedJudgeCount: entry.expectedJudgeCount,
+      runtimeLabel:
+        input.presentation.operationalLabelsByContestant.get(entry.contestantId)
+          ?.runtimeLabel ?? "—",
+      estimatedCostLabel:
+        input.presentation.operationalLabelsByContestant.get(entry.contestantId)
+          ?.estimatedCostLabel ?? "—",
       dimensionMeanLabels: formatDimensionMeanLabels(entry.dimensionMeans),
       judgeScores: entry.judgeScores.map((score) => ({
         judgeId: score.judgeId,
-        judgeDisplayName: score.judgeId,
+        judgeDisplayName:
+          input.presentation.judgeDisplayNames.get(score.judgeId) ?? score.judgeId,
         totalScore: score.totalScore,
         originalityScore: score.originalityScore,
         critique: score.critique,
@@ -353,7 +417,7 @@ export async function buildPreviousChallengePage(
           : { candidateRank: score.candidateRank }),
       })),
       awards: entry.awards.map((award) => ({ label: award.label })),
-      failure: entry.failure,
+      failure: publicFailureMessage(entry.status),
     };
   });
   const awards = input.leaderboard.entries.flatMap((entry) =>
@@ -362,7 +426,8 @@ export async function buildPreviousChallengePage(
       anonymousCandidateId: entry.contestantId,
       winningDisplayName: entry.displayName,
       judgeId: award.judgeId,
-      judgeDisplayName: award.judgeId,
+      judgeDisplayName:
+        input.presentation.judgeDisplayNames.get(award.judgeId) ?? award.judgeId,
       rationale: award.rationale,
     })),
   );
@@ -373,6 +438,7 @@ export async function buildPreviousChallengePage(
     generatedAt: input.generatedAt,
     statusBadge: `Previous generation ${input.leaderboard.generationId} field`,
     entries,
+    judgeMatrix: input.presentation.judgeMatrix,
     awards,
   });
   return {

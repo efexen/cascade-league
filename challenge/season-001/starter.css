@@ -30,7 +30,9 @@
 }
 
 /* Major DOM hooks: #local-maxima, .page-shell, #masthead, #introduction,
-   #rules, #leaderboard, .entry-card, #awards, #method, #judge-notes,
+   #rules, #leaderboard, .entry-card, .entry-runtime, .entry-estimated-cost,
+   #awards, #method, #judge-notes, .judge-matrix, .judge-matrix-row,
+   .judge-matrix-cell, .judge-matrix-combined, .judge-matrix-range,
    #site-footer. */
 *,
 *::before,
