@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "generationId", "judgeId", "awards"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "generationId": { "type": "string" },
+    "judgeId": { "type": "string" },
+    "awards": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label", "anonymousCandidateId", "rationale"],
+        "properties": {
+          "label": { "type": "string", "minLength": 1, "maxLength": 50 },
+          "anonymousCandidateId": { "type": "string" },
+          "rationale": { "type": "string", "minLength": 1, "maxLength": 240 }
+        }
+      }
+    }
+  }
+}

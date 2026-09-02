@@ -1,0 +1,57 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "generationId",
+    "judgeId",
+    "anonymousCandidateId",
+    "scores",
+    "totalScore",
+    "critique",
+    "strongestQuality",
+    "primaryWeakness",
+    "nextMove",
+    "confidence",
+    "flags"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "generationId": { "type": "string" },
+    "judgeId": { "type": "string" },
+    "anonymousCandidateId": { "type": "string" },
+    "scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hierarchyAndReadability",
+        "composition",
+        "typography",
+        "colourAndVisualSystem",
+        "coherenceAndCraft",
+        "originalityAndMemorability",
+        "constraintAndCssCraft"
+      ],
+      "properties": {
+        "hierarchyAndReadability": { "type": "integer", "minimum": 0, "maximum": 15 },
+        "composition": { "type": "integer", "minimum": 0, "maximum": 15 },
+        "typography": { "type": "integer", "minimum": 0, "maximum": 15 },
+        "colourAndVisualSystem": { "type": "integer", "minimum": 0, "maximum": 10 },
+        "coherenceAndCraft": { "type": "integer", "minimum": 0, "maximum": 15 },
+        "originalityAndMemorability": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "constraintAndCssCraft": { "type": "integer", "minimum": 0, "maximum": 10 }
+      }
+    },
+    "totalScore": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "critique": { "type": "string", "maxLength": 500 },
+    "strongestQuality": { "type": "string", "maxLength": 500 },
+    "primaryWeakness": { "type": "string", "maxLength": 500 },
+    "nextMove": { "type": "string", "maxLength": 500 },
+    "confidence": { "enum": ["low", "medium", "high"] },
+    "flags": { "type": "array", "items": { "type": "string", "maxLength": 100 } }
+  }
+}

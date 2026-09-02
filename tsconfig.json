@@ -21,6 +21,6 @@
     "skipLibCheck": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "include": ["src/**/*.ts", "integrations/**/*.ts", "test/**/*.ts"],
   "exclude": ["node_modules", "dist", "generations"]
 }
