@@ -1,6 +1,4 @@
 import { readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -11,14 +9,13 @@ import {
   writeGenerationLeaderboard,
 } from "../../src/scoring/generation.js";
 import { LeaderboardSchema, ValidationSchema } from "../../src/schemas/index.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
 
 describe("generation scoring artifacts", () => {
   it("rejects an anonymous map that disagrees with an immutable contestant identity", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-map-integrity-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-map-integrity-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -45,8 +42,8 @@ describe("generation scoring artifacts", () => {
   });
 
   it("does not rank a screenshot left behind by a pending contestant task", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-pending-score-generation-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-pending-score-generation-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -92,9 +89,7 @@ describe("generation scoring artifacts", () => {
   });
 
   it("aggregates the completed local judgment artifacts and writes a validated leaderboard", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-score-generation-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-score-generation-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -132,8 +127,8 @@ describe("generation scoring artifacts", () => {
   }, 30000);
 
   it("ignores a valid judgment stored under the wrong judge directory", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-mismatched-judgment-generation-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-mismatched-judgment-generation-",
     );
     const generation = await createGeneration({
       repositoryRoot,

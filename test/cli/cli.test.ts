@@ -47,6 +47,7 @@ describe("garden CLI inputs", () => {
       { cwd: repositoryRoot },
     );
     expect(result.stdout).toContain("run-wave-b");
+    expect(result.stdout).toContain("Cascade League generation tools");
   });
 });
 

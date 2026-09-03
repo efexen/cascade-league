@@ -1,12 +1,4 @@
-import {
-  copyFile,
-  mkdir,
-  mkdtemp,
-  readFile,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { copyFile, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { chromium } from "playwright";
@@ -21,6 +13,7 @@ import {
   StaticPageNetworkError,
 } from "../../src/rendering/static-page.js";
 import { startLoopbackStaticServer } from "../../src/rendering/static-server.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
 
@@ -55,7 +48,7 @@ body { margin: 0; color: #111; font: 16px sans-serif; }
 `;
 
 async function renderMinimalGallery(extraCss: string) {
-  const root = await mkdtemp(join(tmpdir(), "local-maxima-static-gallery-"));
+  const root = await createTestTempRoot("local-maxima-static-gallery-");
   await writeFile(join(root, "index.html"), MINIMAL_GALLERY_HTML, "utf8");
   await writeFile(
     join(root, "style.css"),
@@ -385,7 +378,7 @@ describe("static public page renderer", () => {
   });
 
   it("wraps maximum-length unbroken judge labels in the fallback matrix", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-fallback-wrap-"));
+    const root = await createTestTempRoot("local-maxima-fallback-wrap-");
     const definition = await loadSeasonDefinition(
       join(repositoryRoot, "challenge/season-001"),
     );
@@ -458,7 +451,7 @@ describe("static public page renderer", () => {
   }, 30000);
 
   it("disables script execution and aborts non-loopback requests", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-static-page-"));
+    const root = await createTestTempRoot("local-maxima-static-page-");
     const definition = await loadSeasonDefinition(
       join(repositoryRoot, "challenge/season-001"),
     );
@@ -484,7 +477,7 @@ describe("static public page renderer", () => {
   }, 30000);
 
   it("renders a local page with a script tag without executing it", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-static-page-local-"));
+    const root = await createTestTempRoot("local-maxima-static-page-local-");
     const definition = await loadSeasonDefinition(
       join(repositoryRoot, "challenge/season-001"),
     );
@@ -506,7 +499,7 @@ describe("static public page renderer", () => {
   }, 30000);
 
   it("rejects a symlinked server root before binding a port", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-static-root-"));
+    const root = await createTestTempRoot("local-maxima-static-root-");
     const target = join(root, "target");
     const link = join(root, "link");
     await writeFile(target, "not a directory\n");
@@ -517,8 +510,8 @@ describe("static public page renderer", () => {
   });
 
   it("rejects traversal and symlinked files while serving only regular local files", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-static-traversal-"));
-    const outside = await mkdtemp(join(tmpdir(), "local-maxima-static-outside-"));
+    const root = await createTestTempRoot("local-maxima-static-traversal-");
+    const outside = await createTestTempRoot("local-maxima-static-outside-");
     await writeFile(join(root, "index.html"), "<!doctype html><p>local</p>");
     await writeFile(join(outside, "secret.txt"), "private\n");
     await mkdir(join(root, "nested"));

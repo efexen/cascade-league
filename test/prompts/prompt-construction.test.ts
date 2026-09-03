@@ -19,7 +19,8 @@ describe("contestant prompt contract", () => {
       starterCssPath: "/private/b/starter.css",
     });
 
-    expect(first).toContain("You are a contestant in Local Maxima");
+    expect(first).toContain("You are a contestant in Cascade League");
+    expect(first).not.toContain("Local Maxima");
     expect(first).toContain("Originality is explicitly important.");
     expect(first).toContain("Do not attempt to run or inspect the result.");
     expect(first).toContain("`/private/a/submission.css`");
@@ -47,9 +48,15 @@ describe("contestant prompt contract", () => {
 
     expect(candidatePrompt).toContain('"anonymousCandidateId": "candidate-abcd"');
     expect(candidatePrompt).toContain("originalityAndMemorability");
+    expect(candidatePrompt).toContain("anonymous design judge for Cascade League");
+    expect(candidatePrompt).not.toContain("Local Maxima");
     expect(candidatePrompt).not.toContain("modelUsage");
     expect(candidatePrompt).not.toContain("fixture-editorial");
     expect(awardsPrompt).toContain("candidate-abcd");
+    expect(awardsPrompt).toContain(
+      "anonymous judging for one Cascade League generation",
+    );
+    expect(awardsPrompt).not.toContain("Local Maxima");
     expect(awardsPrompt).not.toContain("fixture-editorial");
     expect(awardsPrompt).not.toContain("[SUMMARIES]");
   });

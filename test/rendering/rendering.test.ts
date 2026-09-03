@@ -1,5 +1,4 @@
-import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
@@ -9,11 +8,12 @@ import {
   renderCandidate,
   startLoopbackStaticServer,
 } from "../../src/rendering/index.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const config = ChallengeConfigSchema.parse({
   schemaVersion: 1,
   seasonId: "0001",
-  title: "Local Maxima",
+  title: "Cascade League",
   challengeVersion: "1.0.0",
   template: "challenge.hbs",
   starterCss: "starter.css",
@@ -57,7 +57,7 @@ const html = `<!doctype html>
 
 describe("deterministic candidate rendering", () => {
   it("captures a valid candidate at the exact configured viewport", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-render-"));
+    const root = await createTestTempRoot("local-maxima-render-");
     await mkdir(root, { recursive: true });
     await writeFile(join(root, "challenge.html"), html, "utf8");
     await writeFile(
@@ -86,7 +86,7 @@ describe("deterministic candidate rendering", () => {
   });
 
   it("fails when an ancestor makes the whole page fully transparent", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-render-transparent-body-"));
+    const root = await createTestTempRoot("local-maxima-render-transparent-body-");
     await writeFile(join(root, "challenge.html"), html, "utf8");
     await writeFile(join(root, "submission.css"), "body { opacity: 0; }", "utf8");
     const screenshotPath = join(root, "screenshot.png");
@@ -108,8 +108,8 @@ describe("deterministic candidate rendering", () => {
   });
 
   it("fails when an intermediate ancestor makes required content transparent", async () => {
-    const root = await mkdtemp(
-      join(tmpdir(), "local-maxima-render-transparent-intermediate-"),
+    const root = await createTestTempRoot(
+      "local-maxima-render-transparent-intermediate-",
     );
     await writeFile(
       join(root, "challenge.html"),
@@ -140,9 +140,7 @@ describe("deterministic candidate rendering", () => {
   });
 
   it("keeps a normal page valid with a non-zero ancestor opacity", async () => {
-    const root = await mkdtemp(
-      join(tmpdir(), "local-maxima-render-opaque-intermediate-"),
-    );
+    const root = await createTestTempRoot("local-maxima-render-opaque-intermediate-");
     await writeFile(
       join(root, "challenge.html"),
       html.replace(
@@ -174,7 +172,7 @@ describe("deterministic candidate rendering", () => {
   });
 
   it("records and aborts an external browser request", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-render-network-"));
+    const root = await createTestTempRoot("local-maxima-render-network-");
     await writeFile(
       join(root, "challenge.html"),
       html.replace(
@@ -199,8 +197,8 @@ describe("deterministic candidate rendering", () => {
   });
 
   it("serves only regular files inside the candidate challenge directory", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-static-server-"));
-    const outside = await mkdtemp(join(tmpdir(), "local-maxima-static-outside-"));
+    const root = await createTestTempRoot("local-maxima-static-server-");
+    const outside = await createTestTempRoot("local-maxima-static-outside-");
     await writeFile(join(root, "challenge.html"), "inside", "utf8");
     await writeFile(join(outside, "secret.txt"), "outside", "utf8");
     await symlink(join(outside, "secret.txt"), join(root, "leak.txt"));
@@ -218,10 +216,8 @@ describe("deterministic candidate rendering", () => {
   });
 
   it("does not follow a symlinked challenge entry file", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-render-symlink-"));
-    const outside = await mkdtemp(
-      join(tmpdir(), "local-maxima-render-symlink-outside-"),
-    );
+    const root = await createTestTempRoot("local-maxima-render-symlink-");
+    const outside = await createTestTempRoot("local-maxima-render-symlink-outside-");
     await writeFile(join(outside, "challenge.html"), html, "utf8");
     await symlink(join(outside, "challenge.html"), join(root, "challenge.html"));
     await writeFile(join(root, "submission.css"), "body { margin: 0; }", "utf8");
@@ -237,9 +233,7 @@ describe("deterministic candidate rendering", () => {
   });
 
   it("cleans a partial screenshot when screenshot creation fails", async () => {
-    const root = await mkdtemp(
-      join(tmpdir(), "local-maxima-render-screenshot-failure-"),
-    );
+    const root = await createTestTempRoot("local-maxima-render-screenshot-failure-");
     await writeFile(join(root, "challenge.html"), html, "utf8");
     await writeFile(join(root, "submission.css"), "body { margin: 0; }", "utf8");
     const screenshotPath = join(root, "screenshot.png");
@@ -265,9 +259,7 @@ describe("deterministic candidate rendering", () => {
   });
 
   it("preserves an existing screenshot when a replacement capture fails", async () => {
-    const root = await mkdtemp(
-      join(tmpdir(), "local-maxima-render-screenshot-preserve-"),
-    );
+    const root = await createTestTempRoot("local-maxima-render-screenshot-preserve-");
     await writeFile(join(root, "challenge.html"), html, "utf8");
     await writeFile(join(root, "submission.css"), "body { margin: 0; }", "utf8");
     const screenshotPath = join(root, "screenshot.png");

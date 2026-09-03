@@ -3,7 +3,7 @@
   "additionalProperties": false,
   "required": ["schemaVersion", "generationId", "judgeId", "awards"],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "type": "integer", "const": 1 },
     "generationId": { "type": "string" },
     "judgeId": { "type": "string" },
     "awards": {

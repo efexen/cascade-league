@@ -1,7 +1,5 @@
 import { execFile } from "node:child_process";
 import { cp, mkdir, readFile, readdir, symlink, writeFile } from "node:fs/promises";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
@@ -13,6 +11,7 @@ import {
   contestantsDocument,
   judgesDocument,
 } from "../helpers/profile-documents.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
@@ -60,7 +59,7 @@ async function repositoryWithCommandProfile(
   profileId: string,
   promptOnly: boolean,
 ): Promise<string> {
-  const parent = await mkdtemp(join(tmpdir(), "local-maxima-plan-cli-repo-"));
+  const parent = await createTestTempRoot("local-maxima-plan-cli-repo-");
   const copy = join(parent, "repository");
   await cp(repositoryRoot, copy, {
     recursive: true,
@@ -150,7 +149,7 @@ describe("garden plan-generation", () => {
   });
 
   it("prints the full fixture plan with C=3, J=2, and a maximum of 11 calls", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-plan-gens-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-plan-gens-");
     const result = await runGarden([
       "plan-generation",
       "--season",
@@ -188,7 +187,7 @@ describe("garden plan-generation", () => {
   });
 
   it("writes nothing to disk", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-plan-gens-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-plan-gens-");
     const result = await runGarden([
       "plan-generation",
       "--season",
@@ -203,7 +202,7 @@ describe("garden plan-generation", () => {
   });
 
   it("exits nonzero when preflight reports errors, listing the issues", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-plan-gens-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-plan-gens-");
     const environment: NodeJS.ProcessEnv = { ...process.env };
     delete environment.EXAMPLE_API_KEY;
     delete environment.SECOND_EXAMPLE_API_KEY;
@@ -284,7 +283,7 @@ describe("garden plan-generation", () => {
   it("uses the same noninteractive acceptance flag for create-generation", async () => {
     const repository = await repositoryWithCommandProfile("prompt-create", true);
     const generationsRoot = join(
-      await mkdtemp(join(tmpdir(), "local-maxima-create-cli-")),
+      await createTestTempRoot("local-maxima-create-cli-"),
       "generations",
     );
     const refused = await runGarden(

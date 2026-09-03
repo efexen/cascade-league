@@ -1,15 +1,5 @@
 import { createHash } from "node:crypto";
-import {
-  chmod,
-  cp,
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  rm,
-  writeFile,
-} from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -24,6 +14,7 @@ import { FixtureJudgeAdapter, type JudgeAdapter } from "../../src/judging/index.
 import { runGeneration } from "../../src/orchestration/generation.js";
 import { runWaveB } from "../../src/orchestration/wave-b.js";
 import { ManifestSchema, RunSchema, TaskStateSchema } from "../../src/schemas/index.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
 
@@ -89,8 +80,8 @@ function fixtureJudgeAdapter(
 
 describe("complete generation orchestration", () => {
   it("rebuilds from archived gallery source after repository challenge drift", async () => {
-    const repositoryParent = await mkdtemp(
-      join(tmpdir(), "local-maxima-archived-gallery-repository-"),
+    const repositoryParent = await createTestTempRoot(
+      "local-maxima-archived-gallery-repository-",
     );
     const temporaryRepository = join(repositoryParent, "repository");
     await cp(repositoryRoot, temporaryRepository, {
@@ -141,8 +132,8 @@ describe("complete generation orchestration", () => {
   }, 30000);
 
   it("rejects a tampered archived gallery source before creating public output", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-gallery-archive-tamper-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-gallery-archive-tamper-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -186,9 +177,7 @@ describe("complete generation orchestration", () => {
   }, 30000);
 
   it("creates and advances a new generation through Wave B once", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-new-generation-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-new-generation-");
     const progress: string[] = [];
 
     const result = await runGeneration({
@@ -205,7 +194,7 @@ describe("complete generation orchestration", () => {
   }, 30000);
 
   it("runs the fixture tournament through scoring, gallery, and completion", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generation-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-generation-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -234,8 +223,8 @@ describe("complete generation orchestration", () => {
   }, 30000);
 
   it("uses configured concurrency in the resumable production path", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-resumable-concurrency-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-resumable-concurrency-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -312,8 +301,8 @@ describe("complete generation orchestration", () => {
   }, 30000);
 
   it("paces only genuinely pending adapter calls when resuming schema-v2 production artifacts", async () => {
-    const mirrorRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-resumable-v2-repository-"),
+    const mirrorRoot = await createTestTempRoot(
+      "local-maxima-resumable-v2-repository-",
     );
     await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
       recursive: true,
@@ -399,8 +388,8 @@ describe("complete generation orchestration", () => {
       "utf8",
     );
 
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-resumable-v2-generation-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-resumable-v2-generation-",
     );
     const generation = await createGeneration({
       repositoryRoot: mirrorRoot,
@@ -664,9 +653,7 @@ describe("complete generation orchestration", () => {
   }, 30000);
 
   it("rebuilds public output deterministically without changing source artifacts", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-gallery-rebuild-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-gallery-rebuild-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -715,9 +702,7 @@ describe("complete generation orchestration", () => {
   }, 30000);
 
   it("resumes after a render interruption without rerunning terminal contestant tasks", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-resume-generation-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-resume-generation-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -803,7 +788,7 @@ describe("complete generation orchestration", () => {
   }, 30000);
 
   it("resumes pending judge work while preserving a completed judgment", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-resume-judge-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-resume-judge-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -900,9 +885,7 @@ describe("complete generation orchestration", () => {
   }, 30000);
 
   it("does not rerun a terminal awards task after interruption", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-resume-awards-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-resume-awards-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -963,9 +946,7 @@ describe("complete generation orchestration", () => {
   }, 30000);
 
   it("does not retry a judge task left running with an unknown request outcome", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-uncertain-judge-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-uncertain-judge-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -1047,8 +1028,8 @@ describe("complete generation orchestration", () => {
   }, 30000);
 
   it("does not rerun a terminally failed contestant task on resume", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-resume-failed-contestant-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-resume-failed-contestant-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -1132,8 +1113,8 @@ describe("complete generation orchestration", () => {
   }, 30000);
 
   it("marks ambiguous contestant work uncertain without retrying the adapter", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-resume-uncertain-contestant-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-resume-uncertain-contestant-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -1236,8 +1217,8 @@ describe("complete generation orchestration", () => {
   }, 30000);
 
   it("recovers a terminal contestant run written before its task checkpoint", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-resume-terminal-run-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-resume-terminal-run-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -1311,8 +1292,8 @@ describe("complete generation orchestration", () => {
   }, 30000);
 
   it("builds a fallback gallery when every contestant fails", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-no-valid-contestant-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-no-valid-contestant-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -1359,7 +1340,7 @@ describe("complete generation orchestration", () => {
   }, 30000);
 
   it("keeps valid candidate screenshots but selects no champion when every judge is invalid", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-no-judge-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-no-judge-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot,

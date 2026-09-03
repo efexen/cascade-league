@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -15,6 +14,7 @@ import {
   CandidateJudgmentSchema,
   JudgeCandidateResponseSchema,
 } from "../../src/schemas/index.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 function candidateInput(root: string): JudgeCandidateInput {
   return {
@@ -79,7 +79,7 @@ const CANDIDATE_RESPONSE = {
 
 describe("fixture judge adapter", () => {
   it("emits a strict score response without model usage and a durable judgment with usage", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-judge-"));
+    const root = await createTestTempRoot("local-maxima-judge-");
     const input = candidateInput(root);
     await writeFile(
       input.sanitisedCssPath,
@@ -108,7 +108,7 @@ describe("fixture judge adapter", () => {
   });
 
   it("returns bounded emergent awards for a valid anonymous candidate set", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-awards-"));
+    const root = await createTestTempRoot("local-maxima-awards-");
     const input = candidateInput(root);
     await writeFile(
       input.sanitisedCssPath,
@@ -162,7 +162,7 @@ describe("fixture judge adapter", () => {
   });
 
   it("validates command JSON without model usage and enriches the durable result", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-command-judge-"));
+    const root = await createTestTempRoot("local-maxima-command-judge-");
     const input = candidateInput(root);
     const response = {
       schemaVersion: 1,
@@ -227,7 +227,7 @@ describe("fixture judge adapter", () => {
 
 describe("command judge adapter", () => {
   it("uses complete argv placeholders, shell:false, an environment allowlist, and bounded redacted logs", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-command-judge-boundary-"));
+    const root = await createTestTempRoot("local-maxima-command-judge-boundary-");
     const input = candidateInput(root);
     const response = {
       schemaVersion: 1,
@@ -323,9 +323,7 @@ describe("command judge adapter", () => {
   });
 
   it("materializes every accepted judge placeholder for both score and awards operations", async () => {
-    const root = await mkdtemp(
-      join(tmpdir(), "local-maxima-command-judge-placeholders-"),
-    );
+    const root = await createTestTempRoot("local-maxima-command-judge-placeholders-");
     const input = candidateInput(root);
     const response = {
       schemaVersion: 1,
@@ -461,7 +459,7 @@ describe("command judge adapter", () => {
   });
 
   it("forces a hung judge from TERM to KILL without retrying", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-command-judge-timeout-"));
+    const root = await createTestTempRoot("local-maxima-command-judge-timeout-");
     const input = candidateInput(root);
     const scriptPath = join(root, "hung-judge.mjs");
     await writeFile(
@@ -500,7 +498,7 @@ describe("command judge adapter", () => {
   });
 
   it("kills a real judge process group, including a grandchild holding stdio, before the hard deadline", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-judge-process-tree-"));
+    const root = await createTestTempRoot("local-maxima-judge-process-tree-");
     const pidPath = join(root, "pids.txt");
     const scriptPath = join(root, "tree-judge.sh");
     const grandchildCode =
@@ -573,7 +571,7 @@ describe("command judge adapter", () => {
   }, 5000);
 
   it("archives invalid command JSON without repair or retry", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-command-judge-invalid-"));
+    const root = await createTestTempRoot("local-maxima-command-judge-invalid-");
     const input = candidateInput(root);
     const scriptPath = join(root, "invalid-judge.mjs");
     const invalidJson = '{"totalScore":"invented"}';
@@ -604,7 +602,7 @@ describe("command judge adapter", () => {
   });
 
   it("rejects an oversized sparse judgment before reading or archiving it", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-command-judge-sparse-"));
+    const root = await createTestTempRoot("local-maxima-command-judge-sparse-");
     const input = candidateInput(root);
     const scriptPath = join(root, "sparse-judge.mjs");
     await writeFile(
@@ -633,7 +631,7 @@ describe("command judge adapter", () => {
   });
 
   it("validates the separate command awards response against the anonymous cohort", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-command-awards-"));
+    const root = await createTestTempRoot("local-maxima-command-awards-");
     const input = candidateInput(root);
     const awardsInput: JudgeAwardsInput = {
       generationId: input.generationId,
@@ -712,7 +710,7 @@ describe("command judge adapter", () => {
   });
 
   it("rejects an oversized sparse awards output before reading or archiving it", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-command-awards-sparse-"));
+    const root = await createTestTempRoot("local-maxima-command-awards-sparse-");
     const input = candidateInput(root);
     const awardsInput: JudgeAwardsInput = {
       generationId: input.generationId,
@@ -833,7 +831,7 @@ describe("judge execution metadata", () => {
   }
 
   it("reads valid candidate and awards execution metadata without changing terminal results", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-judge-meta-valid-"));
+    const root = await createTestTempRoot("local-maxima-judge-meta-valid-");
     const input = candidateInput(root);
     const scriptPath = join(root, "meta-judge.mjs");
     await writeFile(
@@ -861,7 +859,7 @@ describe("judge execution metadata", () => {
       providerRequestId: "req-judge-private-42",
     });
 
-    const awardsRoot = await mkdtemp(join(tmpdir(), "local-maxima-judge-meta-awards-"));
+    const awardsRoot = await createTestTempRoot("local-maxima-judge-meta-awards-");
     const awardsInput = awardsInputFor(awardsRoot, input);
     const awardsScriptPath = join(awardsRoot, "meta-awards.mjs");
     await writeFile(
@@ -897,7 +895,7 @@ describe("judge execution metadata", () => {
   });
 
   it("treats missing judge execution metadata as allowed and never changes the terminal result", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-judge-meta-missing-"));
+    const root = await createTestTempRoot("local-maxima-judge-meta-missing-");
     const input = candidateInput(root);
     const scriptPath = join(root, "plain-judge.mjs");
     await writeFile(
@@ -933,7 +931,7 @@ describe("judge execution metadata", () => {
         'writeFileSync(process.argv[3], ""); truncateSync(process.argv[3], 2 * 1024 * 1024);',
       ],
     ] as const) {
-      const root = await mkdtemp(join(tmpdir(), `local-maxima-judge-meta-${name}-`));
+      const root = await createTestTempRoot(`local-maxima-judge-meta-${name}-`);
       const input = candidateInput(root);
       const scriptPath = join(root, `${name}-meta-judge.mjs`);
       await writeFile(
@@ -977,7 +975,7 @@ describe("judge execution metadata", () => {
   });
 
   it("writes deterministic offline fixture judge metadata for both operations", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-judge-fixture-meta-"));
+    const root = await createTestTempRoot("local-maxima-judge-fixture-meta-");
     const input = candidateInput(root);
     await writeFile(
       input.sanitisedCssPath,

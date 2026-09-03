@@ -1,6 +1,5 @@
-import { chmod, mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -15,6 +14,7 @@ import {
   type JudgeAwardsInput,
   type JudgeCandidateInput,
 } from "../../src/judging/index.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const tsxLoaderPath = join(repositoryRoot, "node_modules/tsx/dist/loader.mjs");
@@ -237,15 +237,47 @@ process.exit(23);
 `;
 
 describe("Codex CLI integration contracts", () => {
+  it("declares explicit types for every const-only or enum-only output property", async () => {
+    const scoreSchema = JSON.parse(
+      await readFile(
+        join(repositoryRoot, "integrations/codex/score-output-schema.json"),
+        "utf8",
+      ),
+    ) as {
+      properties: Record<string, Record<string, unknown>>;
+    };
+    const awardsSchema = JSON.parse(
+      await readFile(
+        join(repositoryRoot, "integrations/codex/awards-output-schema.json"),
+        "utf8",
+      ),
+    ) as {
+      properties: Record<string, Record<string, unknown>>;
+    };
+
+    expect(scoreSchema.properties.schemaVersion).toMatchObject({
+      type: "integer",
+      const: 1,
+    });
+    expect(scoreSchema.properties.confidence).toMatchObject({
+      type: "string",
+      enum: ["low", "medium", "high"],
+    });
+    expect(awardsSchema.properties.schemaVersion).toMatchObject({
+      type: "integer",
+      const: 1,
+    });
+  });
+
   it("records the actual Codex executable version", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cascade-league-codex-version-"));
+    const root = await createTestTempRoot("cascade-league-codex-version-");
     const stubPath = await writeStub(root, RECORDING_STUB);
 
     await expect(readCodexVersion(stubPath)).resolves.toBe("0.150.1");
   });
 
   it("constructs a one-shot contestant invocation and collects CSS plus bounded metadata", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cascade-league-codex-contestant-"));
+    const root = await createTestTempRoot("cascade-league-codex-contestant-");
     const workspace = await prepareWorkspace(root, "workspace");
     const stubPath = await writeStub(root, RECORDING_STUB);
     const challengePath = join(workspace, "challenge.html");
@@ -364,7 +396,7 @@ describe("Codex CLI integration contracts", () => {
   });
 
   it("propagates a Codex transport failure once and does not retry", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cascade-league-codex-failure-"));
+    const root = await createTestTempRoot("cascade-league-codex-failure-");
     const workspace = await prepareWorkspace(root, "workspace");
     const stubPath = await writeStub(root, FAILING_STUB);
     const challengePath = join(workspace, "challenge.html");
@@ -431,9 +463,7 @@ describe("Codex CLI integration contracts", () => {
   });
 
   it("surfaces a bounded Codex stderr diagnostic exactly once on transport failure", async () => {
-    const root = await mkdtemp(
-      join(tmpdir(), "cascade-league-codex-stderr-diagnostic-"),
-    );
+    const root = await createTestTempRoot("cascade-league-codex-stderr-diagnostic-");
     const workspace = await prepareWorkspace(root, "workspace");
     const stubPath = await writeStub(root, NOISY_FAILING_STUB);
     const challengePath = join(workspace, "challenge.html");
@@ -502,7 +532,7 @@ describe("Codex CLI integration contracts", () => {
   });
 
   it("rejects a successful invocation that does not leave a regular submission file", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cascade-league-codex-missing-output-"));
+    const root = await createTestTempRoot("cascade-league-codex-missing-output-");
     const workspace = await prepareWorkspace(root, "workspace");
     const stubPath = await writeStub(root, NO_SUBMISSION_STUB);
     const challengePath = join(workspace, "challenge.html");
@@ -533,7 +563,7 @@ describe("Codex CLI integration contracts", () => {
   });
 
   it("infers score versus awards from the generic judge path aliases and passes staged inputs", async () => {
-    const root = await mkdtemp(join(tmpdir(), "cascade-league-codex-judge-"));
+    const root = await createTestTempRoot("cascade-league-codex-judge-");
     const scoreWorkspace = await prepareWorkspace(root, "score-workspace");
     const awardsWorkspace = await prepareWorkspace(root, "awards-workspace");
     const stubPath = await writeStub(root, RECORDING_STUB);

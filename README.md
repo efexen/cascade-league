@@ -1,6 +1,6 @@
-# Local Maxima
+# Cascade League
 
-Local Maxima is a CSS-only design tournament. Phase 1 runs contestants once,
+Cascade League is a CSS-only design tournament. Phase 1 runs contestants once,
 validates and renders their submissions, judges anonymous screenshots, produces
 a deterministic leaderboard, and builds a static gallery. Phase 2 adds
 repeatable run controls, private operational summaries, and a public judge
@@ -123,7 +123,7 @@ contestant or command judge may make external (potentially paid) model calls.
 before they change any state unless you pass `--allow-model-calls`:
 
 ```sh
-pnpm garden run-generation --generation 0001 --generations-root /tmp/local-maxima-runs --allow-model-calls
+pnpm garden run-generation --generation 0001 --generations-root /tmp/cascade-league-runs --allow-model-calls
 ```
 
 The refusal names the number and kind of pending calls (honestly labelled as
@@ -155,7 +155,7 @@ generation, gallery, and private `run-summary.json` paths. To choose the
 output location explicitly:
 
 ```sh
-pnpm garden fixture-tournament --output-root /tmp/local-maxima-fixture-run
+pnpm garden fixture-tournament --output-root /tmp/cascade-league-fixture-run
 ```
 
 Repeated runs allocate another generation under that root rather than
@@ -164,14 +164,14 @@ overwriting a prior generation.
 ## Generation lifecycle
 
 ```sh
-pnpm garden create-generation --season 001 --profile fixture --generations-root /tmp/local-maxima-runs
-pnpm garden run-generation --season 001 --profile fixture --generations-root /tmp/local-maxima-runs
-pnpm garden run-generation --generation 0001 --generations-root /tmp/local-maxima-runs
-pnpm garden resume-generation --generation 0001 --generations-root /tmp/local-maxima-runs
-pnpm garden build-gallery --generation 0001 --generations-root /tmp/local-maxima-runs
-pnpm garden serve-gallery --generation 0001 --generations-root /tmp/local-maxima-runs
-pnpm garden summarize-generation --generation 0001 --generations-root /tmp/local-maxima-runs
-pnpm garden summarize-generation --generation-path /tmp/local-maxima-runs/0001
+pnpm garden create-generation --season 001 --profile fixture --generations-root /tmp/cascade-league-runs
+pnpm garden run-generation --season 001 --profile fixture --generations-root /tmp/cascade-league-runs
+pnpm garden run-generation --generation 0001 --generations-root /tmp/cascade-league-runs
+pnpm garden resume-generation --generation 0001 --generations-root /tmp/cascade-league-runs
+pnpm garden build-gallery --generation 0001 --generations-root /tmp/cascade-league-runs
+pnpm garden serve-gallery --generation 0001 --generations-root /tmp/cascade-league-runs
+pnpm garden summarize-generation --generation 0001 --generations-root /tmp/cascade-league-runs
+pnpm garden summarize-generation --generation-path /tmp/cascade-league-runs/0001
 ```
 
 `--profile` is required whenever a command creates a new generation

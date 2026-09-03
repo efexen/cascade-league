@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { cp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
@@ -13,6 +12,7 @@ import {
   fixtureJudge,
   judgesDocument,
 } from "../helpers/profile-documents.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
@@ -50,7 +50,7 @@ async function runGarden(
  * a fixture judge. No paid model call is possible from these entries.
  */
 async function repositoryWithCommandProfile(): Promise<string> {
-  const parent = await mkdtemp(join(tmpdir(), "local-maxima-guard-cli-repo-"));
+  const parent = await createTestTempRoot("local-maxima-guard-cli-repo-");
   const copy = join(parent, "repository");
   await cp(repositoryRoot, copy, {
     recursive: true,

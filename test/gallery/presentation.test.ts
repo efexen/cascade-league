@@ -1,5 +1,4 @@
-import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -16,6 +15,7 @@ import {
   type Leaderboard,
   type Manifest,
 } from "../../src/schemas/index.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const timestamp = "2026-08-31T12:00:00.000Z";
 const contestantIds = [
@@ -413,7 +413,7 @@ function matrixLeaderboardForRankChecks(): Leaderboard {
 
 describe("gallery presentation", () => {
   it("formats only allowlisted contestant runtime and cost labels", async () => {
-    const generationPath = await mkdtemp(join(tmpdir(), "local-maxima-presentation-"));
+    const generationPath = await createTestTempRoot("local-maxima-presentation-");
     await writeFixtureArtifacts(generationPath);
 
     const presentation = await loadGalleryPresentation({
@@ -445,8 +445,8 @@ describe("gallery presentation", () => {
   });
 
   it("projects configured judge columns and distinct cell outcomes without ranking", async () => {
-    const generationPath = await mkdtemp(
-      join(tmpdir(), "local-maxima-presentation-matrix-"),
+    const generationPath = await createTestTempRoot(
+      "local-maxima-presentation-matrix-",
     );
     await writeMatrixArtifacts(generationPath);
     const matrixLeaderboard = LeaderboardSchema.parse({
@@ -597,8 +597,8 @@ describe("gallery presentation", () => {
   });
 
   it("rejects leaderboard aggregates that contradict the supplied judge totals", async () => {
-    const generationPath = await mkdtemp(
-      join(tmpdir(), "local-maxima-presentation-aggregate-mismatch-"),
+    const generationPath = await createTestTempRoot(
+      "local-maxima-presentation-aggregate-mismatch-",
     );
     await writeMatrixArtifacts(generationPath);
     const base = matrixLeaderboardForRankChecks();
@@ -629,8 +629,8 @@ describe("gallery presentation", () => {
     ["scoreRange", 1],
     ["standardDeviation", 1],
   ] as const)("rejects a contradictory %s aggregate", async (field, value) => {
-    const generationPath = await mkdtemp(
-      join(tmpdir(), "local-maxima-presentation-aggregate-field-mismatch-"),
+    const generationPath = await createTestTempRoot(
+      "local-maxima-presentation-aggregate-field-mismatch-",
     );
     await writeMatrixArtifacts(generationPath);
     const base = matrixLeaderboardForRankChecks();
@@ -656,8 +656,8 @@ describe("gallery presentation", () => {
   it.each(["dimensionMeans", "meanHierarchyAndReadability"] as const)(
     "rejects contradictory %s when dimension score evidence is present",
     async (field) => {
-      const generationPath = await mkdtemp(
-        join(tmpdir(), "local-maxima-presentation-dimension-mismatch-"),
+      const generationPath = await createTestTempRoot(
+        "local-maxima-presentation-dimension-mismatch-",
       );
       await writeMatrixArtifacts(generationPath);
       const base = matrixLeaderboardForRankChecks();
@@ -695,8 +695,8 @@ describe("gallery presentation", () => {
   );
 
   it("accepts archived rankable entries when optional aggregate evidence is absent", async () => {
-    const generationPath = await mkdtemp(
-      join(tmpdir(), "local-maxima-presentation-legacy-aggregates-"),
+    const generationPath = await createTestTempRoot(
+      "local-maxima-presentation-legacy-aggregates-",
     );
     await writeMatrixArtifacts(generationPath);
     const base = matrixLeaderboardForRankChecks();
@@ -722,8 +722,8 @@ describe("gallery presentation", () => {
   });
 
   it("rejects rank order that inverts the official score comparator", async () => {
-    const generationPath = await mkdtemp(
-      join(tmpdir(), "local-maxima-presentation-ranking-mismatch-"),
+    const generationPath = await createTestTempRoot(
+      "local-maxima-presentation-ranking-mismatch-",
     );
     await writeMatrixArtifacts(generationPath);
     const base = matrixLeaderboardForRankChecks();
@@ -749,8 +749,8 @@ describe("gallery presentation", () => {
   it.each(["hierarchy", "contestant ID"] as const)(
     "rejects equal-score rank order that inverts the %s tie-break",
     async (tieBreak) => {
-      const generationPath = await mkdtemp(
-        join(tmpdir(), "local-maxima-presentation-tie-break-mismatch-"),
+      const generationPath = await createTestTempRoot(
+        "local-maxima-presentation-tie-break-mismatch-",
       );
       await writeMatrixArtifacts(generationPath);
       const base = matrixLeaderboardForRankChecks();
@@ -798,8 +798,8 @@ describe("gallery presentation", () => {
   );
 
   it("rejects a scored rankable entry with a null rank", async () => {
-    const generationPath = await mkdtemp(
-      join(tmpdir(), "local-maxima-presentation-null-rank-"),
+    const generationPath = await createTestTempRoot(
+      "local-maxima-presentation-null-rank-",
     );
     await writeMatrixArtifacts(generationPath);
     const base = matrixLeaderboardForRankChecks();
@@ -823,8 +823,8 @@ describe("gallery presentation", () => {
   });
 
   it("rejects a ranked entry without rankable score evidence", async () => {
-    const generationPath = await mkdtemp(
-      join(tmpdir(), "local-maxima-presentation-ranked-without-score-"),
+    const generationPath = await createTestTempRoot(
+      "local-maxima-presentation-ranked-without-score-",
     );
     await writeMatrixArtifacts(generationPath);
     const base = matrixLeaderboardForRankChecks();
@@ -850,8 +850,8 @@ describe("gallery presentation", () => {
   it.each(["invalid", "timeout"] as const)(
     "preserves a valid leaderboard score ahead of a %s task state",
     async (taskStatus) => {
-      const generationPath = await mkdtemp(
-        join(tmpdir(), "local-maxima-presentation-score-precedence-"),
+      const generationPath = await createTestTempRoot(
+        "local-maxima-presentation-score-precedence-",
       );
       await writeMatrixArtifacts(generationPath);
       await writeFile(
@@ -891,13 +891,11 @@ describe("gallery presentation", () => {
   );
 
   it("rejects symlinked private artifact parent directories", async () => {
-    const generationPath = await mkdtemp(
-      join(tmpdir(), "local-maxima-presentation-symlink-"),
+    const generationPath = await createTestTempRoot(
+      "local-maxima-presentation-symlink-",
     );
     await writeFixtureArtifacts(generationPath);
-    const outsidePath = await mkdtemp(
-      join(tmpdir(), "local-maxima-presentation-outside-"),
-    );
+    const outsidePath = await createTestTempRoot("local-maxima-presentation-outside-");
     await mkdir(join(generationPath, "judging/judge-alpha"), { recursive: true });
     await symlink(
       outsidePath,

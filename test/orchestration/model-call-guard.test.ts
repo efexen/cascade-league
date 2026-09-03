@@ -1,14 +1,4 @@
-import {
-  chmod,
-  cp,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  rm,
-  writeFile,
-} from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { stringify as stringifyYaml } from "yaml";
@@ -25,6 +15,7 @@ import {
   fixtureJudge,
   judgesDocument,
 } from "../helpers/profile-documents.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
 
@@ -45,7 +36,7 @@ async function repositoryWithCommandContestants(
   promptOnly = false,
   missingEnvironment = false,
 ): Promise<GuardRepository> {
-  const mirrorRoot = await mkdtemp(join(tmpdir(), "local-maxima-guard-repo-"));
+  const mirrorRoot = await createTestTempRoot("local-maxima-guard-repo-");
   await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
     recursive: true,
   });
@@ -142,7 +133,7 @@ async function repositoryWithCommandContestants(
 }
 
 async function createStubGeneration(mirrorRoot: string) {
-  const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-guard-gens-"));
+  const generationsRoot = await createTestTempRoot("local-maxima-guard-gens-");
   return createGeneration({
     repositoryRoot: mirrorRoot,
     generationsRoot,
@@ -165,9 +156,7 @@ async function readManifestStatus(generationPath: string): Promise<string> {
 describe("--allow-model-calls guard", () => {
   it("requires and persists explicit prompt-only acceptance during creation", async () => {
     const { mirrorRoot } = await repositoryWithCommandContestants("fixture", 4, true);
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-guard-prompt-only-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-guard-prompt-only-");
 
     await expect(
       createGeneration({
@@ -200,9 +189,7 @@ describe("--allow-model-calls guard", () => {
       false,
       true,
     );
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-guard-preflight-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-guard-preflight-");
     await expect(
       createGeneration({
         repositoryRoot: mirrorRoot,
@@ -218,9 +205,7 @@ describe("--allow-model-calls guard", () => {
   it("refuses before creating a generation when runWaveB receives a command profile without consent", async () => {
     const { mirrorRoot, invocationsPath } =
       await repositoryWithCommandContestants("command");
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-guard-precreate-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-guard-precreate-");
 
     await expect(
       runWaveB({
@@ -359,9 +344,7 @@ describe("--allow-model-calls guard", () => {
   }, 60000);
 
   it("does not trigger for fixture-only generations", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-guard-fixture-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-guard-fixture-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -378,7 +361,7 @@ describe("--allow-model-calls guard", () => {
   }, 60000);
 
   it("runs an archived Phase 1 generation without profile.json or run-plan.json", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-guard-phase1-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-guard-phase1-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -413,8 +396,8 @@ describe("--allow-model-calls guard", () => {
   }, 60000);
 
   it("does not treat a Phase 2 generation with a deleted profile artifact as legacy", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-guard-profile-tamper-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-guard-profile-tamper-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -720,9 +703,7 @@ describe("--allow-model-calls guard", () => {
   }, 60000);
 
   it("rejects a modified Phase 2 run-plan artifact", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-guard-plan-tamper-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-guard-plan-tamper-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -741,8 +722,8 @@ describe("--allow-model-calls guard", () => {
   });
 
   it("rejects modified copied config bytes in an archived Phase 1 generation", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-guard-phase1-tamper-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-guard-phase1-tamper-",
     );
     const generation = await createGeneration({
       repositoryRoot,

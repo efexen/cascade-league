@@ -16,7 +16,7 @@
     "flags"
   ],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "type": "integer", "const": 1 },
     "generationId": { "type": "string" },
     "judgeId": { "type": "string" },
     "anonymousCandidateId": { "type": "string" },
@@ -51,7 +51,7 @@
     "strongestQuality": { "type": "string", "maxLength": 500 },
     "primaryWeakness": { "type": "string", "maxLength": 500 },
     "nextMove": { "type": "string", "maxLength": 500 },
-    "confidence": { "enum": ["low", "medium", "high"] },
+    "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
     "flags": { "type": "array", "items": { "type": "string", "maxLength": 100 } }
   }
 }

@@ -34,7 +34,7 @@ const STATIC_COPY: GalleryStaticCopy = GalleryStaticCopySchema.parse({
     "Specific model-and-harness combinations style the same semantic page using CSS alone, then an anonymous model jury critiques the results.",
   headline: "Watch machine taste take shape.",
   introduction:
-    "Local Maxima is a recurring CSS design tournament. Every contestant receives the same HTML snapshot and one attempt to give it a distinct visual language; the resulting gallery keeps the experiment visible.",
+    "Cascade League is a recurring CSS design tournament. Every contestant receives the same HTML snapshot and one attempt to give it a distinct visual language; the resulting gallery keeps the experiment visible.",
   centralQuestion: "Will the population find divergence, convergence, or judge gaming?",
   rules: [
     "Every contestant receives the same HTML.",

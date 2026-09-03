@@ -1,7 +1,5 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -14,6 +12,7 @@ import {
   serializeRunSummary,
   writeRunSummary,
 } from "../../src/summarize/index.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
 const CREATED_AT = "2026-08-30T10:00:00.000Z";
@@ -61,7 +60,7 @@ describe("run-summary normal completion wiring", () => {
   let completionBytes = "";
 
   beforeAll(async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-summary-completion-"));
+    const root = await createTestTempRoot("local-maxima-summary-completion-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot: join(root, "generations"),

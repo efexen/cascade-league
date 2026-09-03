@@ -1,9 +1,9 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 
 import { resolveProfile, type ResolvedProfile } from "../../src/config/profiles.js";
+import { createTestTempRoot } from "./temp-roots.js";
 
 export function commandContestant(id: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -137,7 +137,7 @@ export async function profileFromDocuments(
   judges: Record<string, unknown>,
   profileId = "temp",
 ): Promise<{ root: string; profile: ResolvedProfile }> {
-  const parent = await mkdtemp(join(tmpdir(), "local-maxima-plan-repo-"));
+  const parent = await createTestTempRoot("local-maxima-plan-repo-");
   const profileRoot = join(parent, "config", "profiles", profileId);
   await mkdir(profileRoot, { recursive: true });
   await writeFile(join(profileRoot, "contestants.yaml"), stringifyYaml(contestants));

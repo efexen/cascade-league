@@ -1,6 +1,5 @@
-import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -10,6 +9,7 @@ import {
   materializeContestantArgv,
   type ContestantRunInput,
 } from "../../src/contestants/index.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
 
@@ -50,7 +50,7 @@ function fixtureInput(root: string): ContestantRunInput {
 
 describe("fixture contestant adapter", () => {
   it("copies the named fixture stylesheet once and reports success", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-contestant-"));
+    const root = await createTestTempRoot("local-maxima-contestant-");
     const fixtureRoot = join(root, "fixtures");
     const workspaceRoot = join(root, "workspace");
     const input = fixtureInput(workspaceRoot);
@@ -71,7 +71,7 @@ describe("fixture contestant adapter", () => {
   ] as const)(
     "models a terminal %s outcome without retrying",
     async (fixture, status) => {
-      const root = await mkdtemp(join(tmpdir(), `local-maxima-fixture-${fixture}-`));
+      const root = await createTestTempRoot(`local-maxima-fixture-${fixture}-`);
       const fixtureRoot = join(root, "fixtures");
       const workspaceRoot = join(root, "workspace");
       await mkdir(fixtureRoot, { recursive: true });
@@ -97,7 +97,7 @@ describe("fixture contestant adapter", () => {
   );
 
   it("includes the deterministic render-failure fixture stylesheet", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-fixture-render-failure-"));
+    const root = await createTestTempRoot("local-maxima-fixture-render-failure-");
     const input = fixtureInput(join(root, "workspace"));
     const contestant = {
       ...input.contestant,
@@ -150,7 +150,7 @@ describe("command contestant adapter", () => {
   });
 
   it("records observed versions and provider request id from a produced metadata file", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-command-meta-"));
+    const root = await createTestTempRoot("local-maxima-command-meta-");
     const workspacePath = join(root, "workspace");
     await mkdir(workspacePath, { recursive: true });
     const scriptPath = join(root, "meta-contestant.mjs");
@@ -202,7 +202,7 @@ describe("command contestant adapter", () => {
   });
 
   it("reports null observed versions and incomplete metadata when no file is produced", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-command-nometa-"));
+    const root = await createTestTempRoot("local-maxima-command-nometa-");
     const workspacePath = join(root, "workspace");
     await mkdir(workspacePath, { recursive: true });
     const scriptPath = join(root, "plain-contestant.mjs");
@@ -239,7 +239,7 @@ describe("command contestant adapter", () => {
   });
 
   it("notes an invalid metadata file without changing the run status", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-command-badmeta-"));
+    const root = await createTestTempRoot("local-maxima-command-badmeta-");
     const workspacePath = join(root, "workspace");
     await mkdir(workspacePath, { recursive: true });
     const scriptPath = join(root, "badmeta-contestant.mjs");
@@ -280,7 +280,7 @@ describe("command contestant adapter", () => {
   });
 
   it("materializes complete placeholders and passes only the explicit environment", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-command-"));
+    const root = await createTestTempRoot("local-maxima-command-");
     const workspacePath = join(root, "workspace");
     await mkdir(workspacePath, { recursive: true });
     const scriptPath = join(root, "contestant.mjs");
@@ -341,7 +341,7 @@ describe("command contestant adapter", () => {
   });
 
   it("uses shell:false when spawning an absolute executable", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-shell-"));
+    const root = await createTestTempRoot("local-maxima-shell-");
     const workspacePath = join(root, "workspace");
     await mkdir(workspacePath, { recursive: true });
     const scriptPath = join(root, "contestant.mjs");
@@ -375,7 +375,7 @@ describe("command contestant adapter", () => {
   });
 
   it("terminates a hung process with TERM followed by KILL", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-timeout-"));
+    const root = await createTestTempRoot("local-maxima-timeout-");
     const workspacePath = join(root, "workspace");
     await mkdir(workspacePath, { recursive: true });
     const scriptPath = join(root, "hung-contestant.mjs");
@@ -409,7 +409,7 @@ describe("command contestant adapter", () => {
   });
 
   it("kills a real contestant process group, including a grandchild holding stdio, before the hard deadline", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-process-tree-"));
+    const root = await createTestTempRoot("local-maxima-process-tree-");
     const workspacePath = join(root, "workspace");
     await mkdir(workspacePath, { recursive: true });
     const pidPath = join(root, "pids.txt");
@@ -484,7 +484,7 @@ describe("command contestant adapter", () => {
   }, 5000);
 
   it("bounds and redacts private process logs", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-redaction-"));
+    const root = await createTestTempRoot("local-maxima-redaction-");
     const workspacePath = join(root, "workspace");
     await mkdir(workspacePath, { recursive: true });
     const scriptPath = join(root, "noisy-contestant.mjs");

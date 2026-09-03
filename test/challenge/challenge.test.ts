@@ -68,7 +68,14 @@ describe("Season 1 challenge", () => {
       generatedAt: "2026-08-27T20:00:00.000Z",
     });
 
-    expect(page.html).toMatch(/<body\b[^>]*id="local-maxima"[^>]*class="season-page"/);
+    expect(page.html).toMatch(
+      /<body\b[^>]*id="cascade-league"[^>]*class="season-page"/,
+    );
+    expect(page.html).toContain("<title>Cascade League —");
+    expect(page.html).toContain("Cascade League is a recurring CSS design tournament");
+    expect(page.html).toContain("Cascade League is a static,");
+    expect(page.html).not.toContain("Local Maxima");
+    expect(page.html).not.toContain("local-maxima");
     expect(page.html).toContain('data-season="001"');
     expect(page.html).toContain('data-generation="0001"');
     for (const selector of [

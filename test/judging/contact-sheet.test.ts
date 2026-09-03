@@ -1,16 +1,16 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 
 import { buildAnonymousContactSheet } from "../../src/judging/contact-sheet.js";
 import { ContactSheetOrderSchema } from "../../src/schemas/index.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 describe("anonymous contact sheets", () => {
   it("builds a deterministic 1600×900 sheet with anonymous labels and fitted cells", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-contact-sheet-"));
+    const root = await createTestTempRoot("local-maxima-contact-sheet-");
     const screenshots = await Promise.all(
       ["#cc5544", "#3366aa", "#449966"].map(async (background, index) => {
         const path = join(root, `candidate-${index + 1}.png`);
@@ -90,7 +90,7 @@ describe("anonymous contact sheets", () => {
   });
 
   it("removes the temporary contact sheet when the final rename fails", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-contact-sheet-failure-"));
+    const root = await createTestTempRoot("local-maxima-contact-sheet-failure-");
     const screenshotPath = join(root, "candidate.png");
     await sharp({
       create: { width: 1440, height: 1200, channels: 4, background: "#3366aa" },
@@ -122,7 +122,7 @@ describe("anonymous contact sheets", () => {
   });
 
   it("removes an order artifact when contact-sheet construction fails after ordering", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-contact-order-failure-"));
+    const root = await createTestTempRoot("local-maxima-contact-order-failure-");
     const screenshotPath = join(root, "candidate.png");
     await sharp({
       create: { width: 1440, height: 1200, channels: 4, background: "#3366aa" },
@@ -153,7 +153,7 @@ describe("anonymous contact sheets", () => {
   });
 
   it("preserves existing contact-sheet artifacts when a rebuild fails", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-contact-preserve-"));
+    const root = await createTestTempRoot("local-maxima-contact-preserve-");
     const outputPath = join(root, "sheet.png");
     const orderPath = join(root, "sheet-order.json");
     await writeFile(outputPath, "previous sheet", "utf8");

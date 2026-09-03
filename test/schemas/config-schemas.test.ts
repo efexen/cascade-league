@@ -13,7 +13,7 @@ import {
 const challengeConfig = {
   schemaVersion: 1,
   seasonId: "0001",
-  title: "Local Maxima",
+  title: "Cascade League",
   challengeVersion: "1.0.0",
   template: "challenge.hbs",
   starterCss: "starter.css",

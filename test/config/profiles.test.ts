@@ -1,5 +1,4 @@
-import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { cp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { stringify as stringifyYaml } from "yaml";
@@ -12,6 +11,7 @@ import {
   ContestantsConfigSchema,
   JudgesConfigSchema,
 } from "../../src/schemas/index.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
 
@@ -79,7 +79,7 @@ async function repositoryWithProfile(
   profileId: string,
   files: Record<string, unknown>,
 ): Promise<string> {
-  const parent = await mkdtemp(join(tmpdir(), "local-maxima-profile-repo-"));
+  const parent = await createTestTempRoot("local-maxima-profile-repo-");
   const profileRoot = join(parent, "config", "profiles", profileId);
   await mkdir(profileRoot, { recursive: true });
   for (const [name, value] of Object.entries(files)) {
@@ -154,7 +154,7 @@ describe("named configuration profiles", () => {
   });
 
   it("reports a missing profile directory by name", async () => {
-    const parent = await mkdtemp(join(tmpdir(), "local-maxima-profile-empty-"));
+    const parent = await createTestTempRoot("local-maxima-profile-empty-");
     await expect(resolveProfile(parent, "absent")).rejects.toThrow(/absent/);
   });
 
@@ -163,7 +163,7 @@ describe("named configuration profiles", () => {
       "contestants.yaml": contestantsConfig(),
       "judges.yaml": judgesConfig(),
     });
-    const parent = await mkdtemp(join(tmpdir(), "local-maxima-profile-symlink-"));
+    const parent = await createTestTempRoot("local-maxima-profile-symlink-");
     await mkdir(join(parent, "config", "profiles"), { recursive: true });
     await symlink(
       join(source, "config", "profiles", "real"),
@@ -178,7 +178,7 @@ describe("named configuration profiles", () => {
       "judges.yaml": judgesConfig(),
     });
     const profileRoot = join(parent, "config", "profiles", "mixed");
-    const outside = await mkdtemp(join(tmpdir(), "local-maxima-profile-outside-"));
+    const outside = await createTestTempRoot("local-maxima-profile-outside-");
     const outsideJudges = join(outside, "judges.yaml");
     await cp(join(profileRoot, "judges.yaml"), outsideJudges);
     await rm(join(profileRoot, "judges.yaml"));

@@ -1,11 +1,11 @@
-import { mkdtemp, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 
 import { createGeneration } from "../../src/artifacts/generation.js";
 import { runGeneration } from "../../src/orchestration/generation.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
 const referencePath = join(
@@ -16,9 +16,7 @@ const generatedAt = "2026-08-28T20:00:00.000Z";
 
 describe("static gallery visual reference", () => {
   it("stays within the documented M4/macOS pixel-difference threshold", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-visual-reference-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-visual-reference-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot,

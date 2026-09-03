@@ -74,7 +74,7 @@ function boundedErrorMessage(error: unknown, maximumCharacters = 600): string {
     : `${message.slice(0, maximumCharacters - 1)}…`;
 }
 
-program.name("garden").description("Local Maxima generation tools").version("0.1.0");
+program.name("garden").description("Cascade League generation tools").version("0.1.0");
 
 program
   .command("verify")
@@ -84,7 +84,7 @@ program
     const profileId = await requireProfile("verify", options.profile);
     const report = await verifyRepository(process.cwd(), profileId);
     if (report.ok) {
-      console.log("Local Maxima verification passed.");
+      console.log("Cascade League verification passed.");
     }
     for (const entry of report.issues) {
       console.error(`[${entry.severity}] ${entry.code}: ${entry.message}`);
@@ -342,7 +342,7 @@ program
   .action(async (options: { readonly outputRoot?: string }) => {
     const outputRoot =
       options.outputRoot === undefined
-        ? await mkdtemp(join(tmpdir(), "local-maxima-fixture-"))
+        ? await mkdtemp(join(tmpdir(), "cascade-league-fixture-"))
         : resolve(options.outputRoot);
     const generationsRoot = join(outputRoot, "generations");
     const created = await createGeneration({

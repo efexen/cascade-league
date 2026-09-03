@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readdir, readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { relative } from "node:path";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import sharp from "sharp";
@@ -18,6 +17,7 @@ import {
   RunSummarySchema,
   SnapshotSchema,
 } from "../../src/schemas/index.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
 const timestamp = "2026-08-31T14:00:00.000Z";
@@ -78,7 +78,7 @@ async function expectExactScreenshot(path: string): Promise<void> {
 
 describe("Phase 2 gallery acceptance", () => {
   it("completes the offline fixture gallery with immutable, private, exact-size artifacts", async () => {
-    const outputRoot = await mkdtemp(join(tmpdir(), "local-maxima-phase2-gallery-"));
+    const outputRoot = await createTestTempRoot("local-maxima-phase2-gallery-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot: join(outputRoot, "generations"),

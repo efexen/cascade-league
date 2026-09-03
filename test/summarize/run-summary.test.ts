@@ -1,5 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { stringify as stringifyYaml } from "yaml";
@@ -28,6 +27,7 @@ import {
   serializeRunSummary,
   writeRunSummary,
 } from "../../src/summarize/index.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const GENERATION_ID = "0001";
 const SEASON_ID = "0001";
@@ -461,7 +461,7 @@ const DEFAULT_RUNS: Record<string, RunFixture> = {
 export async function buildDurableGeneration(
   overrides: DurableGenerationOverrides = {},
 ): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "local-maxima-run-summary-"));
+  const root = await createTestTempRoot("local-maxima-run-summary-");
   const generationPath = join(root, GENERATION_ID);
   await mkdir(join(generationPath, "config"), { recursive: true });
   await mkdir(join(generationPath, "contestants"), { recursive: true });
@@ -1314,7 +1314,7 @@ describe("run summary builder", () => {
 
   it("summarizes a real fixture-orchestrated generation from its durable artifacts", async () => {
     const repositoryRoot = new URL("../../", import.meta.url).pathname;
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-run-summary-e2e-"));
+    const root = await createTestTempRoot("local-maxima-run-summary-e2e-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot: join(root, "generations"),

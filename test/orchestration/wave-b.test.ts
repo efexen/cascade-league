@@ -9,8 +9,6 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
@@ -50,6 +48,7 @@ import type {
   JudgeCandidateInput,
 } from "../../src/judging/index.js";
 import type { JudgeConfig } from "../../src/schemas/index.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
 
@@ -82,7 +81,7 @@ async function filesContaining(root: string, needle: string): Promise<string[]> 
 
 describe("Wave-B fixture orchestration", () => {
   it("applies schema-v2 contestant groups with FIFO pacing and durable wait-free timings", async () => {
-    const mirrorRoot = await mkdtemp(join(tmpdir(), "local-maxima-wave-b-v2-repo-"));
+    const mirrorRoot = await createTestTempRoot("local-maxima-wave-b-v2-repo-");
     await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
       recursive: true,
     });
@@ -122,7 +121,7 @@ describe("Wave-B fixture orchestration", () => {
       "utf8",
     );
 
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-wave-b-v2-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-wave-b-v2-");
     const generation = await createGeneration({
       repositoryRoot: mirrorRoot,
       generationsRoot,
@@ -167,9 +166,7 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("runs judge assessments in stored order with retained group pacing and awards only after valid results", async () => {
-    const mirrorRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-judge-v2-repo-"),
-    );
+    const mirrorRoot = await createTestTempRoot("local-maxima-wave-b-judge-v2-repo-");
     await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
       recursive: true,
     });
@@ -203,9 +200,7 @@ describe("Wave-B fixture orchestration", () => {
       "utf8",
     );
 
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-judge-v2-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-wave-b-judge-v2-");
     const generation = await createGeneration({
       repositoryRoot: mirrorRoot,
       generationsRoot,
@@ -318,8 +313,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("honors contestant and per-judge concurrency while preserving stored order", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-concurrency-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-concurrency-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -395,7 +390,7 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("runs the complete fixture Wave-B path with anonymous stored judge artifacts", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-wave-b-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-wave-b-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -574,7 +569,7 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("isolates static, execution, timeout, and render failures and judges only rendered candidates", async () => {
-    const mirrorRoot = await mkdtemp(join(tmpdir(), "local-maxima-wave-b-mixed-repo-"));
+    const mirrorRoot = await createTestTempRoot("local-maxima-wave-b-mixed-repo-");
     await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
       recursive: true,
     });
@@ -627,7 +622,7 @@ describe("Wave-B fixture orchestration", () => {
       await readFile(join(repositoryRoot, "config/profiles/fixture/judges.yaml")),
     );
 
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-wave-b-mixed-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-wave-b-mixed-");
     const generation = await createGeneration({
       repositoryRoot: mirrorRoot,
       generationsRoot,
@@ -683,8 +678,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("archives an invalid judge response and continues the other judge without awards", async () => {
-    const mirrorRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-invalid-judge-repo-"),
+    const mirrorRoot = await createTestTempRoot(
+      "local-maxima-wave-b-invalid-judge-repo-",
     );
     await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
       recursive: true,
@@ -715,8 +710,8 @@ describe("Wave-B fixture orchestration", () => {
       "utf8",
     );
 
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-invalid-judge-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-invalid-judge-",
     );
     const generation = await createGeneration({
       repositoryRoot: mirrorRoot,
@@ -788,8 +783,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("collects only declared command outputs from a contestant workspace", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-command-collection-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-command-collection-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -870,9 +865,7 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("does not copy an oversized declared usage file after a bounded read", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-usage-cap-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-wave-b-usage-cap-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -943,8 +936,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("archives valid contestant execution metadata privately and keeps configured identity separate", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-contestant-meta-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-contestant-meta-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -1079,8 +1072,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("treats missing contestant execution metadata as allowed and explicitly incomplete", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-contestant-meta-missing-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-contestant-meta-missing-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -1152,8 +1145,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("bounds invalid or oversized contestant metadata without archiving, retrying, or crashing", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-contestant-meta-bad-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-contestant-meta-bad-",
     );
     const editorialCss = await readFile(
       join(repositoryRoot, "test/fixtures/contestants/editorial.css"),
@@ -1185,9 +1178,7 @@ describe("Wave-B fixture orchestration", () => {
       delayMs: 1,
     });
     const commandAdapter = new CommandContestantAdapter();
-    const mirrorRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-bad-meta-repo-"),
-    );
+    const mirrorRoot = await createTestTempRoot("local-maxima-wave-b-bad-meta-repo-");
     await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
       recursive: true,
     });
@@ -1285,9 +1276,7 @@ describe("Wave-B fixture orchestration", () => {
   }, 60000);
 
   it("archives valid judge execution metadata privately for candidates and awards without leaking request ids", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-judge-meta-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-wave-b-judge-meta-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -1497,8 +1486,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 60000);
 
   it("treats missing judge execution metadata as allowed with no durable copy, status change, or retry", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-judge-meta-missing-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-judge-meta-missing-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -1613,8 +1602,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 60000);
 
   it("bounds invalid or oversized judge metadata without archive, retry, or status change", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-judge-meta-bad-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-judge-meta-bad-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -1766,8 +1755,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 60000);
 
   it("does not mark a judge candidate successful when usage archival is oversized", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-judge-usage-cap-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-judge-usage-cap-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -1808,8 +1797,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("records a bounded awards failure and continues the other judge", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-awards-failure-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-awards-failure-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -1860,8 +1849,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("isolates one candidate assessment failure while later candidates continue", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-candidate-failure-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-candidate-failure-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -1911,8 +1900,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("rejects a contestant that modifies its challenge HTML or font workspace", async () => {
-    const mirrorRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-input-tamper-repo-"),
+    const mirrorRoot = await createTestTempRoot(
+      "local-maxima-wave-b-input-tamper-repo-",
     );
     await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
       recursive: true,
@@ -1974,8 +1963,8 @@ describe("Wave-B fixture orchestration", () => {
       "utf8",
     );
 
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-input-tamper-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-input-tamper-",
     );
     const generation = await createGeneration({
       repositoryRoot: mirrorRoot,
@@ -2007,8 +1996,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("stops before accepting a screenshot when a harness tampers with canonical challenge inputs", async () => {
-    const mirrorRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-canonical-tamper-repo-"),
+    const mirrorRoot = await createTestTempRoot(
+      "local-maxima-wave-b-canonical-tamper-repo-",
     );
     await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
       recursive: true,
@@ -2069,8 +2058,8 @@ describe("Wave-B fixture orchestration", () => {
       "utf8",
     );
 
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-canonical-tamper-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-canonical-tamper-",
     );
     const generation = await createGeneration({
       repositoryRoot: mirrorRoot,
@@ -2099,8 +2088,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("isolates a contact-sheet setup failure to one judge and continues later judges", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-contact-failure-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-contact-failure-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -2129,8 +2118,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("isolates an unexpected judge setup failure and continues later judges", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-judge-isolation-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-judge-isolation-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -2165,8 +2154,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("isolates per-candidate staging failures and continues the other judge", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-staging-failure-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-staging-failure-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -2202,8 +2191,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("rejects tampered sanitised CSS before staging it for a judge", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-sanitised-tamper-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-sanitised-tamper-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -2244,8 +2233,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("domain-separates judge seeds when the injected random source repeats bytes", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-seed-domains-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-seed-domains-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -2279,8 +2268,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("stops when canonical challenge inputs change during rendering", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-render-integrity-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-render-integrity-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -2329,8 +2318,8 @@ describe("Wave-B fixture orchestration", () => {
   }, 30000);
 
   it("rejects generation config tampering even when its manifest hash is rewritten", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-wave-b-config-integrity-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-wave-b-config-integrity-",
     );
     const generation = await createGeneration({
       repositoryRoot,

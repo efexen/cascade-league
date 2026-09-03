@@ -1,7 +1,6 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { cp, mkdir, symlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
@@ -17,6 +16,7 @@ import {
   fixtureJudge,
   judgesDocument,
 } from "../helpers/profile-documents.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
@@ -89,7 +89,7 @@ describe("garden summarize-generation", () => {
   }, 30000);
 
   it("regenerates byte-identical summaries through both location forms", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-summary-cli-"));
+    const root = await createTestTempRoot("local-maxima-summary-cli-");
     const generationsRoot = join(root, "generations");
     const generation = await createGeneration({
       repositoryRoot,
@@ -132,7 +132,7 @@ describe("garden summarize-generation", () => {
   }, 180000);
 
   it("returns nonzero with a bounded clear error for a generation mismatch", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-summary-cli-tamper-"));
+    const root = await createTestTempRoot("local-maxima-summary-cli-tamper-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot: join(root, "generations"),
@@ -172,7 +172,7 @@ describe("garden summarize-generation", () => {
   }, 180000);
 
   it("invokes no adapters and needs no consent for a command-backed generation whose work is durable", async () => {
-    const parent = await mkdtemp(join(tmpdir(), "local-maxima-summary-command-"));
+    const parent = await createTestTempRoot("local-maxima-summary-command-");
     const copy = join(parent, "repository");
     await cp(repositoryRoot, copy, {
       recursive: true,

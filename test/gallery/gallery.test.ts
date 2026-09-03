@@ -1,6 +1,5 @@
-import { cp, chmod, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, chmod, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
@@ -18,6 +17,7 @@ import {
   ValidationSchema,
   type Leaderboard,
 } from "../../src/schemas/index.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
 const timestamp = "2026-08-28T20:00:00.000Z";
@@ -202,8 +202,8 @@ function recomputeLeaderboardEvidence(
 
 describe("static public gallery", () => {
   it("renders operational labels and the exact configured judge matrix", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-gallery-presentation-integration-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-gallery-presentation-integration-",
     );
     const { generation, result } =
       await createCompletedFixtureGeneration(generationsRoot);
@@ -234,9 +234,7 @@ describe("static public gallery", () => {
   }, 30000);
 
   it("rejects contradictory leaderboard evidence before selecting a champion", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-gallery-integrity-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-gallery-integrity-");
     const { generation } = await createCompletedFixtureGeneration(generationsRoot);
     const leaderboard = LeaderboardSchema.parse(
       JSON.parse(
@@ -262,8 +260,8 @@ describe("static public gallery", () => {
   }, 30000);
 
   it("renders missing, invalid, and timed-out judge states in the final matrix DOM", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-gallery-matrix-states-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-gallery-matrix-states-",
     );
     const { generation } = await createCompletedFixtureGeneration(generationsRoot);
     const manifest = ManifestSchema.parse(
@@ -376,8 +374,8 @@ describe("static public gallery", () => {
   }, 30000);
 
   it("publishes only allowlisted operational values", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-gallery-privacy-allowlist-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-gallery-privacy-allowlist-",
     );
     const { generation, result } =
       await createCompletedFixtureGeneration(generationsRoot);
@@ -456,8 +454,8 @@ describe("static public gallery", () => {
   }, 30000);
 
   it("escapes adversarial judge and configuration labels in the matrix", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-gallery-judge-label-escape-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-gallery-judge-label-escape-",
     );
     const { generation } = await createCompletedFixtureGeneration(generationsRoot);
     const judgesPath = join(generation.generationPath, "config/judges.yaml");
@@ -515,7 +513,7 @@ describe("static public gallery", () => {
   }, 30000);
 
   it("rejects partial and extra leaderboard contestant sets", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-gallery-set-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-gallery-set-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -579,8 +577,8 @@ describe("static public gallery", () => {
   }, 30000);
 
   it("rejects a leaderboard identity whose contestant ID differs from its directory", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-gallery-identity-integrity-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-gallery-identity-integrity-",
     );
     const generation = await createGeneration({
       repositoryRoot,
@@ -614,8 +612,8 @@ describe("static public gallery", () => {
   }, 30000);
 
   it("rejects a leaderboard status that disagrees with complete judge artifacts", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-gallery-status-integrity-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-gallery-status-integrity-",
     );
     const { generation } = await createCompletedFixtureGeneration(generationsRoot);
     const leaderboard = LeaderboardSchema.parse(
@@ -645,8 +643,8 @@ describe("static public gallery", () => {
   }, 30000);
 
   it("falls back when champion CSS hides populated gallery content", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-gallery-visibility-fallback-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-gallery-visibility-fallback-",
     );
     const { generation, result: completed } =
       await createCompletedFixtureGeneration(generationsRoot);
@@ -700,8 +698,8 @@ describe("static public gallery", () => {
     ];
 
     for (const [index, cssRule] of hostileRules.entries()) {
-      const generationsRoot = await mkdtemp(
-        join(tmpdir(), `local-maxima-gallery-new-visibility-${String(index)}-`),
+      const generationsRoot = await createTestTempRoot(
+        `local-maxima-gallery-new-visibility-${String(index)}-`,
       );
       const { generation, result: completed } =
         await createCompletedFixtureGeneration(generationsRoot);
@@ -733,8 +731,8 @@ describe("static public gallery", () => {
   }, 120000);
 
   it("keeps champion CSS with a benign thumbnail clip path", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-gallery-benign-clip-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-gallery-benign-clip-",
     );
     const { generation, result: completed } =
       await createCompletedFixtureGeneration(generationsRoot);
@@ -787,8 +785,8 @@ describe("static public gallery", () => {
   ])(
     "falls back for %s champion CSS",
     async (_name, cssRule) => {
-      const generationsRoot = await mkdtemp(
-        join(tmpdir(), "local-maxima-gallery-visibility-adversarial-"),
+      const generationsRoot = await createTestTempRoot(
+        "local-maxima-gallery-visibility-adversarial-",
       );
       const { generation, result: completed } =
         await createCompletedFixtureGeneration(generationsRoot);
@@ -825,8 +823,8 @@ describe("static public gallery", () => {
   );
 
   it("formats repeating three-judge aggregate means with exactly two decimals", async () => {
-    const repositoryParent = await mkdtemp(
-      join(tmpdir(), "local-maxima-gallery-decimal-repository-"),
+    const repositoryParent = await createTestTempRoot(
+      "local-maxima-gallery-decimal-repository-",
     );
     const temporaryRepository = join(repositoryParent, "repository");
     await cp(repositoryRoot, temporaryRepository, {
@@ -868,7 +866,7 @@ describe("static public gallery", () => {
   }, 30000);
 
   it("copies the champion stylesheet exactly and captures an exact-size share image", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-gallery-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-gallery-");
     const { generation, result } =
       await createCompletedFixtureGeneration(generationsRoot);
     const champion = result.leaderboard.entries.find(
@@ -923,9 +921,7 @@ describe("static public gallery", () => {
   }, 30000);
 
   it("escapes model strings while preserving the script-free local-resource policy", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-gallery-escape-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-gallery-escape-");
     const { generation } = await createCompletedFixtureGeneration(generationsRoot);
     const leaderboardPath = join(generation.generationPath, "leaderboard.json");
     const leaderboard = LeaderboardSchema.parse(
@@ -1020,9 +1016,7 @@ describe("static public gallery", () => {
   }, 30000);
 
   it("builds a fallback gallery without inventing a champion score", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-gallery-fallback-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-gallery-fallback-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -1154,9 +1148,7 @@ describe("static public gallery", () => {
   }, 30000);
 
   it("rejects a changed resolved challenge before rebuilding public output", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-gallery-integrity-"),
-    );
+    const generationsRoot = await createTestTempRoot("local-maxima-gallery-integrity-");
     const { generation } = await createCompletedFixtureGeneration(generationsRoot);
     const challengePath = join(generation.generationPath, "challenge/challenge.html");
     await chmod(challengePath, 0o644);

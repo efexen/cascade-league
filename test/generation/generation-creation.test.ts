@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import {
   cp,
   copyFile,
-  mkdtemp,
   readFile,
   readdir,
   stat,
@@ -10,7 +9,6 @@ import {
   writeFile,
   unlink,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
@@ -27,6 +25,7 @@ import {
 } from "../../src/schemas/index.js";
 import { createGeneration } from "../../src/artifacts/generation.js";
 import { runGeneration } from "../../src/orchestration/generation.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
 const timestamp = "2026-08-27T20:00:00.000Z";
@@ -143,7 +142,7 @@ async function createCompletedFirstGeneration(
 }
 
 async function copyRepositoryForTest(): Promise<string> {
-  const parent = await mkdtemp(join(tmpdir(), "local-maxima-repository-"));
+  const parent = await createTestTempRoot("local-maxima-repository-");
   const copy = join(parent, "repository");
   await cp(repositoryRoot, copy, {
     recursive: true,
@@ -163,8 +162,8 @@ function tableMarkup(html: string): string {
 
 describe("immutable generation creation", () => {
   it("uses the previous generation actual judge matrix and hashes every presentation input", async () => {
-    const generationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-generations-presentation-"),
+    const generationsRoot = await createTestTempRoot(
+      "local-maxima-generations-presentation-",
     );
     const first = await createGeneration({
       repositoryRoot,
@@ -268,7 +267,7 @@ describe("immutable generation creation", () => {
   }, 30000);
 
   it("writes config/profile.json, hashes it, and copies profile sources verbatim", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-generations-");
     const result = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -334,7 +333,7 @@ describe("immutable generation creation", () => {
   });
 
   it("writes run-plan.json, validates it, and hashes it into the snapshot", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-generations-");
     const result = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -385,7 +384,7 @@ describe("immutable generation creation", () => {
   });
 
   it("initializes pending run.json observed versions as unknown, never the configured identity", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-generations-");
     const result = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -420,7 +419,7 @@ describe("immutable generation creation", () => {
   });
 
   it("rejects unknown, symlinked, or traversal profile identifiers at creation", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-generations-");
     await expect(
       createGeneration({
         repositoryRoot,
@@ -445,7 +444,7 @@ describe("immutable generation creation", () => {
   });
 
   it("creates validated artifacts with identical contestant snapshots", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-generations-");
     const result = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -538,7 +537,7 @@ describe("immutable generation creation", () => {
   });
 
   it("refuses to reuse a generation number without changing existing bytes", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-generations-");
     const options = {
       repositoryRoot,
       generationsRoot,
@@ -556,7 +555,7 @@ describe("immutable generation creation", () => {
   });
 
   it("records hashes for representative repository snapshot inputs", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-generations-");
     const result = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -640,11 +639,11 @@ describe("immutable generation creation", () => {
         .toBuffer(),
     );
 
-    const originalGenerationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-generations-"),
+    const originalGenerationsRoot = await createTestTempRoot(
+      "local-maxima-generations-",
     );
-    const changedGenerationsRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-generations-"),
+    const changedGenerationsRoot = await createTestTempRoot(
+      "local-maxima-generations-",
     );
     const originalGeneration = await createGeneration({
       repositoryRoot: originalRepositoryRoot,
@@ -691,7 +690,7 @@ describe("immutable generation creation", () => {
   });
 
   it("uses a completed previous leaderboard as the next challenge data source", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-generations-");
     await createCompletedFirstGeneration(generationsRoot);
 
     const second = await createGeneration({
@@ -732,7 +731,7 @@ describe("immutable generation creation", () => {
   });
 
   it("records hashes for the previous manifest, leaderboard, and used screenshots", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-generations-");
     const { first, entries } = await createCompletedFirstGeneration(generationsRoot);
     const second = await createGeneration({
       repositoryRoot,
@@ -762,7 +761,7 @@ describe("immutable generation creation", () => {
   });
 
   it("copies prior candidate screenshots only as fixed-size reduced thumbnails", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-generations-");
     const { first, entries } = await createCompletedFirstGeneration(generationsRoot);
     const contestantIds = [...fixtureContestantIds];
     const originalScreenshot = await sharp({
@@ -828,7 +827,7 @@ describe("immutable generation creation", () => {
   });
 
   it("rejects a correctly named previous screenshot that is not a PNG", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-generations-");
     const first = await createGeneration({
       repositoryRoot,
       generationsRoot,
@@ -921,9 +920,9 @@ describe("immutable generation creation", () => {
   });
 
   it("rejects a previous screenshot symlink that escapes the generation", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-generations-");
     const { first } = await createCompletedFirstGeneration(generationsRoot);
-    const outsideDirectory = await mkdtemp(join(tmpdir(), "local-maxima-outside-"));
+    const outsideDirectory = await createTestTempRoot("local-maxima-outside-");
     const outsideScreenshot = join(outsideDirectory, "screenshot.png");
     await copyFile(
       join(first.generationPath, "challenge/thumbnails/seed-02.png"),
@@ -950,7 +949,7 @@ describe("immutable generation creation", () => {
   });
 
   it("rejects generation two when the previous manifest is incomplete", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-generations-");
     await createCompletedFirstGeneration(generationsRoot, false);
 
     await expect(
@@ -967,7 +966,7 @@ describe("immutable generation creation", () => {
   });
 
   it("rejects generation two when the previous copied judges config fails its manifest hash", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-generations-");
     const { first } = await createCompletedFirstGeneration(generationsRoot);
     const previousJudgesPath = join(first.generationPath, "config/judges.yaml");
     await writeFile(
@@ -990,7 +989,7 @@ describe("immutable generation creation", () => {
   });
 
   it("rejects a changed current enabled roster without creating generation two", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-generations-");
     const copiedRepositoryRoot = await copyRepositoryForTest();
     await createCompletedFirstGeneration(generationsRoot, true, copiedRepositoryRoot);
     const contestantsConfigPath = join(
@@ -1031,7 +1030,7 @@ describe("immutable generation creation", () => {
         .replace(/(- id: fixture-generic[\s\S]*? {4}enabled:) true/u, "$1 false"),
       "utf8",
     );
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-generations-");
 
     await expect(
       createGeneration({
@@ -1049,7 +1048,7 @@ describe("immutable generation creation", () => {
   });
 
   it("rejects a previous leaderboard whose contestant roster differs", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-generations-");
     const { first, entries } = await createCompletedFirstGeneration(generationsRoot);
     await writeFile(
       join(first.generationPath, "leaderboard.json"),
@@ -1083,7 +1082,7 @@ describe("immutable generation creation", () => {
   });
 
   it("allows only one concurrent creator to win a generation collision", async () => {
-    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const generationsRoot = await createTestTempRoot("local-maxima-generations-");
     const options = {
       repositoryRoot,
       generationsRoot,

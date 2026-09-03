@@ -1,17 +1,10 @@
-import {
-  mkdir,
-  mkdtemp,
-  readFile,
-  symlink,
-  truncate,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, readFile, symlink, truncate, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { validateSubmission } from "../../src/validation/index.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 describe("CSS submission validation", () => {
   async function writeChallenge(root: string): Promise<void> {
@@ -25,7 +18,7 @@ describe("CSS submission validation", () => {
   }
 
   it("accepts local challenge fonts and removes comments without reordering CSS", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-css-"));
+    const root = await createTestTempRoot("local-maxima-css-");
     await writeChallenge(root);
     const source =
       '/* private note */\r\n.grid { display: grid; background: linear-gradient(red, blue); }\r\n.grid::before { content: "ok"; }\r\n@font-face { font-family: "LM Mono"; src: url("fonts/lm-mono.ttf"); }\r\n';
@@ -63,7 +56,7 @@ describe("CSS submission validation", () => {
     "a { background: url(HTTPs://example.test/image.png); }",
     String.raw`a { background: url(\68 ttps://example.test/image.png); }`,
   ])("rejects prohibited URL form: %s", async (source) => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-css-url-"));
+    const root = await createTestTempRoot("local-maxima-css-url-");
     await writeChallenge(root);
     await writeFile(join(root, "submission.css"), source, "utf8");
 
@@ -79,7 +72,7 @@ describe("CSS submission validation", () => {
   });
 
   it("rejects unusual structural @import syntax", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-css-import-"));
+    const root = await createTestTempRoot("local-maxima-css-import-");
     await writeChallenge(root);
     await writeFile(
       join(root, "submission.css"),
@@ -117,7 +110,7 @@ describe("CSS submission validation", () => {
       },
     ];
     for (const current of cases) {
-      const root = await mkdtemp(join(tmpdir(), `local-maxima-css-${current.name}-`));
+      const root = await createTestTempRoot(`local-maxima-css-${current.name}-`);
       await writeChallenge(root);
       const submissionPath = join(root, "submission.css");
       await writeFile(submissionPath, current.bytes);
@@ -133,7 +126,7 @@ describe("CSS submission validation", () => {
   });
 
   it("rejects local URLs outside documented font assets and symlink escapes", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-css-local-"));
+    const root = await createTestTempRoot("local-maxima-css-local-");
     await writeChallenge(root);
     await writeFile(join(root, "other.txt"), "not a font\n", "utf8");
     await writeFile(
@@ -141,7 +134,7 @@ describe("CSS submission validation", () => {
       'a { background: url("other.txt"); }',
       "utf8",
     );
-    const outsideRoot = await mkdtemp(join(tmpdir(), "local-maxima-css-outside-"));
+    const outsideRoot = await createTestTempRoot("local-maxima-css-outside-");
     await writeFile(join(outsideRoot, "escaped.ttf"), "outside\n", "utf8");
     await symlink(join(outsideRoot, "escaped.ttf"), join(root, "fonts/escaped.ttf"));
 
@@ -157,7 +150,7 @@ describe("CSS submission validation", () => {
   });
 
   it("rejects an oversized sparse submission from its lstat size before reading it", async () => {
-    const root = await mkdtemp(join(tmpdir(), "local-maxima-css-sparse-"));
+    const root = await createTestTempRoot("local-maxima-css-sparse-");
     await writeChallenge(root);
     const submissionPath = join(root, "submission.css");
     await writeFile(submissionPath, "", "utf8");

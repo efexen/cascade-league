@@ -1,5 +1,4 @@
-import { cp, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { cp, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -18,11 +17,12 @@ import {
   TaskStateSchema,
   type ContestantsConfig,
 } from "../../src/schemas/index.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
 
 async function fixtureRepository(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "local-maxima-acceptance-repo-"));
+  const root = await createTestTempRoot("local-maxima-acceptance-repo-");
   for (const directory of ["challenge", "config", "test/fixtures"]) {
     await cp(join(repositoryRoot, directory), join(root, directory), {
       recursive: true,
@@ -169,9 +169,7 @@ describe("Phase 1 acceptance outcomes", () => {
       join(root, "config/profiles/fixture/contestants.yaml"),
       stringifyYaml(mixedConfig),
     );
-    const generationRoot = await mkdtemp(
-      join(tmpdir(), "local-maxima-mixed-generation-"),
-    );
+    const generationRoot = await createTestTempRoot("local-maxima-mixed-generation-");
     const generation = await createGeneration({
       repositoryRoot: root,
       generationsRoot: generationRoot,
@@ -301,7 +299,7 @@ describe("Phase 1 acceptance outcomes", () => {
   }, 30000);
 
   it("keeps valid scores and ranks candidates as judge_incomplete when one judge is invalid", async () => {
-    const generationRoot = await mkdtemp(join(tmpdir(), "local-maxima-invalid-judge-"));
+    const generationRoot = await createTestTempRoot("local-maxima-invalid-judge-");
     const generation = await createGeneration({
       repositoryRoot,
       generationsRoot: generationRoot,

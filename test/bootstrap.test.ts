@@ -10,10 +10,12 @@ describe("repository bootstrap", () => {
     const packageJson = JSON.parse(
       readFileSync(join(repositoryRoot, "package.json"), "utf8"),
     ) as {
+      name?: string;
       engines?: { node?: string };
       scripts?: Record<string, string>;
     };
 
+    expect(packageJson.name).toBe("cascade-league");
     expect(readFileSync(join(repositoryRoot, ".nvmrc"), "utf8").trim()).toMatch(
       /^24(?:\.\d+\.\d+)?$/,
     );

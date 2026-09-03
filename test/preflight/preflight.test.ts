@@ -1,6 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
 import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { stringify as stringifyYaml } from "yaml";
@@ -10,6 +8,7 @@ import {
   runProfilePreflightChecks,
   runRepositoryPreflight,
 } from "../../src/preflight/index.js";
+import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
 
@@ -100,7 +99,7 @@ async function profileFromDocuments(
   contestants: Record<string, unknown>,
   judges: Record<string, unknown>,
 ): Promise<ResolvedProfile> {
-  const parent = await mkdtemp(join(tmpdir(), "local-maxima-preflight-repo-"));
+  const parent = await createTestTempRoot("local-maxima-preflight-repo-");
   const profileRoot = join(parent, "config", "profiles", "temp");
   await mkdir(profileRoot, { recursive: true });
   await writeFile(join(profileRoot, "contestants.yaml"), stringifyYaml(contestants));
@@ -148,7 +147,7 @@ describe("profile preflight: enabled_roster", () => {
 
 describe("repository preflight season selection", () => {
   it("checks the requested normalized season instead of season-001", async () => {
-    const parent = await mkdtemp(join(tmpdir(), "local-maxima-season-preflight-"));
+    const parent = await createTestTempRoot("local-maxima-season-preflight-");
     await cp(
       join(repositoryRoot, "challenge/season-001"),
       join(parent, "challenge/season-002"),

@@ -8,7 +8,7 @@ export interface ContestantPromptPaths {
  * This text is intentionally kept as a literal: the packet makes its
  * generation-one contestant prompt a normative protocol artifact.
  */
-export const CONTESTANT_GENERATION_ONE_PROMPT_TEMPLATE = String.raw`You are a contestant in Local Maxima, a CSS-only design tournament.
+export const CONTESTANT_GENERATION_ONE_PROMPT_TEMPLATE = String.raw`You are a contestant in Cascade League, a CSS-only design tournament.
 
 Your identity in this tournament is a specific model-and-harness combination. You have one attempt to design the supplied page. You will not receive a screenshot or a second revision opportunity.
 
@@ -102,7 +102,7 @@ export interface JudgeCandidatePromptMetadata {
   readonly anonymousCandidateId: string;
 }
 
-const JUDGE_CANDIDATE_PROMPT_TEMPLATE = String.raw`You are an anonymous design judge for Local Maxima, a CSS-only design tournament.
+const JUDGE_CANDIDATE_PROMPT_TEMPLATE = String.raw`You are an anonymous design judge for Cascade League, a CSS-only design tournament.
 
 Evaluate one candidate page. You do not know which model or harness produced it. Do not infer or guess its identity.
 
@@ -203,7 +203,7 @@ export interface JudgeAwardPromptSummary {
   readonly critique: string;
 }
 
-const JUDGE_AWARDS_PROMPT_TEMPLATE = String.raw`You have completed anonymous judging for one Local Maxima generation.
+const JUDGE_AWARDS_PROMPT_TEMPLATE = String.raw`You have completed anonymous judging for one Cascade League generation.
 
 Review the cohort contact sheet and your own score-and-critique summaries. Invent up to three short awards that recognise qualities genuinely present in this particular cohort. The categories should emerge from the work; do not use a predetermined taxonomy.
 
