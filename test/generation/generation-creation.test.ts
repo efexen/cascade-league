@@ -966,6 +966,29 @@ describe("immutable generation creation", () => {
     expect(await readdir(generationsRoot)).toEqual(["0001"]);
   });
 
+  it("rejects generation two when the previous copied judges config fails its manifest hash", async () => {
+    const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
+    const { first } = await createCompletedFirstGeneration(generationsRoot);
+    const previousJudgesPath = join(first.generationPath, "config/judges.yaml");
+    await writeFile(
+      previousJudgesPath,
+      `${await readFile(previousJudgesPath, "utf8")}\n# tampered after completion\n`,
+      "utf8",
+    );
+
+    await expect(
+      createGeneration({
+        repositoryRoot,
+        generationsRoot,
+        seasonId: "0001",
+        profileId: "fixture",
+        generationId: "0002",
+        now: "2026-08-28T20:00:00.000Z",
+      }),
+    ).rejects.toThrow(/config\/judges\.yaml failed its manifest hash check/u);
+    expect(await readdir(generationsRoot)).toEqual(["0001"]);
+  });
+
   it("rejects a changed current enabled roster without creating generation two", async () => {
     const generationsRoot = await mkdtemp(join(tmpdir(), "local-maxima-generations-"));
     const copiedRepositoryRoot = await copyRepositoryForTest();

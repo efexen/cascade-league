@@ -763,8 +763,20 @@ export async function createGeneration(
       LeaderboardSchema,
     );
     previousLeaderboard = currentPreviousLeaderboard;
+    const previousJudgesConfigPath = join(
+      currentPreviousGenerationPath,
+      "config/judges.yaml",
+    );
+    if (
+      (await sha256File(previousJudgesConfigPath)) !==
+      previousManifest.configHashes.judges
+    ) {
+      throw new Error(
+        "previous generation config/judges.yaml failed its manifest hash check",
+      );
+    }
     const previousJudgesConfig = await readYamlWithSchema(
-      join(currentPreviousGenerationPath, "config/judges.yaml"),
+      previousJudgesConfigPath,
       JudgesConfigSchema,
     );
     previousPresentation = await loadGalleryPresentation({
