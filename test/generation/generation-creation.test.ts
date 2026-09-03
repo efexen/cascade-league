@@ -629,7 +629,7 @@ describe("immutable generation creation", () => {
       thumbnailPath,
       await sharp({
         create: {
-          width: 1440,
+          width: 1280,
           height: 1200,
           channels: 4,
           background: { r: 30, g: 30, b: 30, alpha: 1 },

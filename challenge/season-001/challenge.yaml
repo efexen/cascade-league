@@ -1,13 +1,13 @@
 schemaVersion: 1
 seasonId: "0001"
 title: Cascade League
-challengeVersion: "1.1.0"
+challengeVersion: 1.2.0
 template: challenge.hbs
 starterCss: starter.css
 fallbackCss: fallback.css
 seedData: seed/seed-generation.json
 viewport:
-  width: 1440
+  width: 1280
   height: 1200
   deviceScaleFactor: 1
 browser:

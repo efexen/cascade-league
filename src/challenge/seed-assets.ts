@@ -3,7 +3,8 @@ import { join } from "node:path";
 
 import sharp from "sharp";
 
-const WIDTH = 1440;
+const WIDTH = 1280;
+const SOURCE_WIDTH = 1440;
 const HEIGHT = 1200;
 
 const compositions = [
@@ -51,7 +52,7 @@ function compositionSvg(index: number): string {
     throw new Error(`No seed composition exists for index ${index}`);
   }
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${SOURCE_WIDTH} ${HEIGHT}" preserveAspectRatio="none">
   <rect width="${WIDTH}" height="${HEIGHT}" fill="${composition.background}"/>
   <g fill="${composition.foreground}" opacity="0.72">${composition.shape}</g>
   <g fill="none" stroke="${composition.detail}" stroke-width="18" opacity="0.9">

@@ -20,7 +20,7 @@ const challengeConfig = {
   fallbackCss: "fallback.css",
   seedData: "seed/seed-generation.json",
   viewport: {
-    width: 1440,
+    width: 1280,
     height: 1200,
     deviceScaleFactor: 1,
   },
@@ -126,6 +126,14 @@ describe("configuration schemas", () => {
         judges: [judge],
       }),
     ).toBeTruthy();
+  });
+
+  it("accepts the archived 1440px viewport contract for historical rebuilds", () => {
+    const archived = ChallengeConfigSchema.parse({
+      ...challengeConfig,
+      viewport: { ...challengeConfig.viewport, width: 1440 },
+    });
+    expect(archived.viewport.width).toBe(1440);
   });
 
   it("rejects unknown keys at every configuration boundary", () => {

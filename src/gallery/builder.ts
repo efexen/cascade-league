@@ -27,6 +27,19 @@ import {
   loadGalleryPresentation,
   validateLeaderboardIntegrity,
 } from "./presentation.js";
+import { GALLERY_LAYOUT_CSS } from "./layout.js";
+
+const GALLERY_LAYOUT_STYLESHEET_LINK =
+  '    <link rel="stylesheet" href="gallery-layout.css">';
+
+function attachGalleryLayoutStylesheet(html: string): string {
+  const closingHead = "  </head>";
+  const firstIndex = html.indexOf(closingHead);
+  if (firstIndex < 0 || html.indexOf(closingHead, firstIndex + 1) >= 0) {
+    throw new Error("public HTML must contain exactly one closing head tag");
+  }
+  return html.replace(closingHead, `${GALLERY_LAYOUT_STYLESHEET_LINK}\n${closingHead}`);
+}
 import {
   ChallengeConfigSchema,
   ContestantsConfigSchema,
@@ -113,6 +126,10 @@ function publicScreenshotName(index: number): string {
   return `screenshots/entry-${String(index + 1).padStart(3, "0")}.png`;
 }
 
+function publicFullScreenshotName(index: number): string {
+  return `screenshots/entry-${String(index + 1).padStart(3, "0")}-full.png`;
+}
+
 async function assertRegularFile(path: string, description: string): Promise<void> {
   const status = await lstat(path);
   if (status.isSymbolicLink() || !status.isFile()) {
@@ -120,15 +137,31 @@ async function assertRegularFile(path: string, description: string): Promise<voi
   }
 }
 
-async function assertPngScreenshot(path: string, description: string): Promise<void> {
+async function assertPngScreenshot(
+  path: string,
+  description: string,
+  expectedWidth?: number,
+  minimumHeight?: number,
+  maximumHeight?: number,
+): Promise<void> {
   await assertRegularFile(path, description);
   const metadata = await sharp(path).metadata();
-  if (
-    metadata.format !== "png" ||
-    metadata.width !== 1440 ||
-    metadata.height !== 1200
-  ) {
-    throw new Error(`${description} must be an exact 1440×1200 PNG`);
+  const dimensionsInvalid =
+    expectedWidth === undefined ||
+    minimumHeight === undefined ||
+    maximumHeight === undefined
+      ? (metadata.width ?? 0) <= 0 || (metadata.height ?? 0) <= 0
+      : metadata.width !== expectedWidth ||
+        (metadata.height ?? 0) < minimumHeight ||
+        (metadata.height ?? 0) > maximumHeight;
+  if (metadata.format !== "png" || dimensionsInvalid) {
+    throw new Error(
+      expectedWidth === undefined ||
+      minimumHeight === undefined ||
+      maximumHeight === undefined
+        ? `${description} must be a PNG with positive dimensions`
+        : `${description} must be a ${String(expectedWidth)}px-wide PNG between ${String(minimumHeight)}px and ${String(maximumHeight)}px tall`,
+    );
   }
 }
 
@@ -136,8 +169,17 @@ async function copyScreenshot(
   sourcePath: string,
   destinationPath: string,
   description: string,
+  expectedWidth: number,
+  minimumHeight: number,
+  maximumHeight: number,
 ): Promise<void> {
-  await assertPngScreenshot(sourcePath, description);
+  await assertPngScreenshot(
+    sourcePath,
+    description,
+    expectedWidth,
+    minimumHeight,
+    maximumHeight,
+  );
   await mkdir(dirname(destinationPath), { recursive: true });
   await copyFile(sourcePath, destinationPath);
 }
@@ -511,6 +553,7 @@ function pageEntries(
     { readonly runtimeLabel: string; readonly estimatedCostLabel: string }
   >,
   screenshotPaths: readonly string[],
+  fullScreenshotPaths: readonly (string | null)[],
   statusLabels: GalleryStaticCopy["statusLabels"],
 ): PageEntry[] {
   return leaderboard.entries.map((entry, index) => ({
@@ -526,6 +569,9 @@ function pageEntries(
         ? `No screenshot available for ${entry.displayName}`
         : `${entry.displayName} candidate screenshot`,
     screenshotPath: screenshotPaths[index]!,
+    ...(fullScreenshotPaths[index] === null
+      ? {}
+      : { fullScreenshotPath: fullScreenshotPaths[index]! }),
     combinedScoreLabel: scoreLabel(entry.combinedScore),
     originalityScoreLabel: scoreLabel(entry.originalityScore),
     completedJudgeCount: entry.completedJudgeCount,
@@ -666,11 +712,16 @@ export async function buildGallery(
     `.${basename(publicPath)}.build-${randomBytes(8).toString("hex")}`,
   );
   const screenshotPaths: string[] = [];
+  const fullScreenshotPaths: Array<string | null> = [];
   try {
     await mkdir(join(temporaryPath, "screenshots"), { recursive: true });
     await copyFonts(
       join(generationPath, "challenge/fonts"),
       join(temporaryPath, "fonts"),
+    );
+    await writeTextAtomically(
+      join(temporaryPath, "gallery-layout.css"),
+      GALLERY_LAYOUT_CSS,
     );
     for (const [index, entry] of leaderboard.entries.entries()) {
       const publicRelativePath = publicScreenshotName(index);
@@ -682,11 +733,40 @@ export async function buildGallery(
             `candidate ${entry.contestantId} has an unsafe screenshot path`,
           );
         }
+        const fullRelativePath = publicFullScreenshotName(index);
+        const fullSourcePath = join(generationPath, entry.screenshotPath);
         await copyScreenshot(
-          join(generationPath, entry.screenshotPath),
-          publicScreenshotPath,
-          `candidate ${entry.contestantId} screenshot`,
+          fullSourcePath,
+          join(temporaryPath, fullRelativePath),
+          `candidate ${entry.contestantId} full screenshot`,
+          challengeConfig.viewport.width,
+          challengeConfig.viewport.height,
+          12_000,
         );
+        const viewportSourcePath = join(
+          generationPath,
+          "contestants",
+          entry.contestantId,
+          "screenshot-viewport.png",
+        );
+        let previewSourcePath = viewportSourcePath;
+        try {
+          await lstat(viewportSourcePath);
+        } catch (error) {
+          const missing =
+            error instanceof Error && "code" in error && error.code === "ENOENT";
+          if (!missing || challengeConfig.viewport.width !== 1440) throw error;
+          previewSourcePath = fullSourcePath;
+        }
+        await copyScreenshot(
+          previewSourcePath,
+          publicScreenshotPath,
+          `candidate ${entry.contestantId} viewport screenshot`,
+          challengeConfig.viewport.width,
+          challengeConfig.viewport.height,
+          challengeConfig.viewport.height,
+        );
+        fullScreenshotPaths.push(fullRelativePath);
       } else {
         const seedEntry =
           definition.seed.entries[index % definition.seed.entries.length]!;
@@ -694,7 +774,11 @@ export async function buildGallery(
           join(generationPath, "challenge", seedEntry.screenshotPath),
           publicScreenshotPath,
           `fallback screenshot for ${entry.contestantId}`,
+          challengeConfig.viewport.width,
+          challengeConfig.viewport.height,
+          12_000,
         );
+        fullScreenshotPaths.push(null);
       }
       screenshotPaths.push(publicRelativePath);
     }
@@ -729,18 +813,20 @@ export async function buildGallery(
           judgeNames,
           presentation.operationalLabelsByContestant,
           screenshotPaths,
+          fullScreenshotPaths,
           definition.staticCopy.statusLabels,
         ),
         judgeMatrix: presentation.judgeMatrix,
         awards: pageAwards(leaderboard, judgeNames),
       });
+      const publicHtml = attachGalleryLayoutStylesheet(page.html);
       if (
-        /<script\b/iu.test(page.html) ||
-        /\b(?:src|href)=["'](?:https?:|\/\/)/iu.test(page.html)
+        /<script\b/iu.test(publicHtml) ||
+        /\b(?:src|href)=["'](?:https?:|\/\/)/iu.test(publicHtml)
       ) {
         throw new Error("public HTML contains a script or remote resource");
       }
-      await writeTextAtomically(join(temporaryPath, "index.html"), page.html);
+      await writeTextAtomically(join(temporaryPath, "index.html"), publicHtml);
       await writeJson(
         join(temporaryPath, "metadata.json"),
         PublicMetadataSchema.parse({
@@ -765,6 +851,7 @@ export async function buildGallery(
         rootPath: temporaryPath,
         entryFile: "index.html",
         screenshotPath: join(temporaryPath, "gallery-screenshot.png"),
+        viewportScreenshotPath: join(temporaryPath, "gallery-viewport.png"),
         challengeConfig,
         verifyGalleryContent: true,
       });
@@ -787,6 +874,7 @@ export async function buildGallery(
         reason: `${selectedStylesheet.champion?.displayName ?? "The rank-1 candidate"} remains the numeric rank-1 champion, but its CSS could not safely present required public content; the archived fallback stylesheet is used.`,
       };
       await rm(join(temporaryPath, "gallery-screenshot.png"), { force: true });
+      await rm(join(temporaryPath, "gallery-viewport.png"), { force: true });
       await renderPublic(selectedStylesheet);
     }
     await replacePublicDirectory(temporaryPath, publicPath);

@@ -2,7 +2,7 @@
 <html lang="en-GB">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=1440, initial-scale=1">
+    <meta name="viewport" content="width=1280, initial-scale=1">
     <meta
       http-equiv="Content-Security-Policy"
       content="default-src 'none'; script-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; media-src 'none'; worker-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'"
@@ -82,7 +82,7 @@
                       class="entry-thumbnail"
                       src="{{screenshotPath}}"
                       alt="{{alt}}"
-                      width="1440"
+                      width="1280"
                       height="1200"
                     >
                     <figcaption class="entry-caption">{{statusLabel}}</figcaption>
@@ -90,22 +90,7 @@
                   <dl class="entry-scores">
                     <div><dt>Combined</dt><dd>{{combinedScoreLabel}}</dd></div>
                     <div><dt>Originality</dt><dd>{{originalityScoreLabel}}</dd></div>
-                    <div><dt>Judges</dt><dd>{{completedJudgeCount}} / {{expectedJudgeCount}}</dd></div>
-                    <div><dt>Status</dt><dd>{{statusLabel}}</dd></div>
-                    <div class="entry-runtime entry-operational" data-operational="runtime"><dt>Runtime</dt><dd>{{runtimeLabel}}</dd></div>
-                    <div class="entry-estimated-cost entry-cost entry-operational" data-operational="estimated-cost"><dt>Estimated cost</dt><dd>{{estimatedCostLabel}}</dd></div>
                   </dl>
-                  {{#if dimensionMeanLabels}}
-                    <dl class="entry-scores entry-dimension-means">
-                      <div><dt>Hierarchy</dt><dd>{{dimensionMeanLabels.hierarchyAndReadability}}</dd></div>
-                      <div><dt>Composition</dt><dd>{{dimensionMeanLabels.composition}}</dd></div>
-                      <div><dt>Typography</dt><dd>{{dimensionMeanLabels.typography}}</dd></div>
-                      <div><dt>Colour</dt><dd>{{dimensionMeanLabels.colourAndVisualSystem}}</dd></div>
-                      <div><dt>Craft</dt><dd>{{dimensionMeanLabels.coherenceAndCraft}}</dd></div>
-                      <div><dt>Originality</dt><dd>{{dimensionMeanLabels.originalityAndMemorability}}</dd></div>
-                      <div><dt>CSS craft</dt><dd>{{dimensionMeanLabels.constraintAndCssCraft}}</dd></div>
-                    </dl>
-                  {{/if}}
                   {{#if failure}}
                     <p class="entry-failure">{{failure}}</p>
                   {{/if}}
@@ -114,8 +99,13 @@
                       <li class="entry-award">{{label}}</li>
                     {{/each}}
                   </ul>
-                  <a class="entry-detail-link" href="#entry-detail-{{id}}">Read judge
-                    notes</a>
+                  {{#if fullScreenshotPath}}
+                    <a class="entry-detail-link entry-full-link" href="{{fullScreenshotPath}}">View
+                      full design</a>
+                  {{else}}
+                    <a class="entry-detail-link" href="#entry-detail-{{id}}">Read judge
+                      notes</a>
+                  {{/if}}
                 </article>
               </li>
             {{/each}}
@@ -193,6 +183,22 @@
                 <h3>{{displayName}}</h3>
                 <p>{{statusLabel}}</p>
               </header>
+              <dl class="entry-operational-details">
+                <div><dt>Judges</dt><dd>{{completedJudgeCount}} / {{expectedJudgeCount}}</dd></div>
+                <div class="entry-runtime entry-operational" data-operational="runtime"><dt>Runtime</dt><dd>{{runtimeLabel}}</dd></div>
+                <div class="entry-estimated-cost entry-cost entry-operational" data-operational="estimated-cost"><dt>Estimated cost</dt><dd>{{estimatedCostLabel}}</dd></div>
+              </dl>
+              {{#if dimensionMeanLabels}}
+                <dl class="entry-dimension-means">
+                  <div><dt>Hierarchy</dt><dd>{{dimensionMeanLabels.hierarchyAndReadability}}</dd></div>
+                  <div><dt>Composition</dt><dd>{{dimensionMeanLabels.composition}}</dd></div>
+                  <div><dt>Typography</dt><dd>{{dimensionMeanLabels.typography}}</dd></div>
+                  <div><dt>Colour</dt><dd>{{dimensionMeanLabels.colourAndVisualSystem}}</dd></div>
+                  <div><dt>Craft</dt><dd>{{dimensionMeanLabels.coherenceAndCraft}}</dd></div>
+                  <div><dt>Originality</dt><dd>{{dimensionMeanLabels.originalityAndMemorability}}</dd></div>
+                  <div><dt>CSS craft</dt><dd>{{dimensionMeanLabels.constraintAndCssCraft}}</dd></div>
+                </dl>
+              {{/if}}
               {{#if judgeScores}}
                 <ol class="judge-note-list">
                   {{#each judgeScores}}

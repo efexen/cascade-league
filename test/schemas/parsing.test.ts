@@ -14,7 +14,7 @@ const challenge = {
   starterCss: "starter.css",
   fallbackCss: "fallback.css",
   seedData: "seed/seed-generation.json",
-  viewport: { width: 1440, height: 1200, deviceScaleFactor: 1 },
+  viewport: { width: 1280, height: 1200, deviceScaleFactor: 1 },
   browser: {
     engine: "chromium",
     colorScheme: "light",

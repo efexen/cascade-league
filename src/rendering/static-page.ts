@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { lstat, mkdir, rename, rm } from "node:fs/promises";
-import { dirname } from "node:path";
+import { lstat, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import sharp from "sharp";
@@ -17,6 +17,7 @@ export interface StaticPageRenderInput {
   readonly rootPath: string;
   readonly entryFile: string;
   readonly screenshotPath: string;
+  readonly viewportScreenshotPath?: string;
   readonly challengeConfig: ChallengeConfig;
   readonly verifyGalleryContent?: boolean;
 }
@@ -29,6 +30,7 @@ export interface StaticPageRenderOptions {
 
 export interface StaticPageRenderResult {
   readonly screenshotPath: string;
+  readonly viewportScreenshotPath?: string;
   readonly externalRequests: readonly string[];
   readonly observedVersions: {
     readonly playwright: string;
@@ -1106,18 +1108,25 @@ async function closeQuietly(
   if (resource !== null) await resource.close().catch(() => undefined);
 }
 
-async function assertScreenshotDimensions(path: string): Promise<void> {
+async function assertScreenshotDimensions(
+  path: string,
+  expectedWidth: number,
+  expectedHeight: number,
+  label: string,
+): Promise<void> {
   const status = await lstat(path);
   if (status.isSymbolicLink() || !status.isFile()) {
-    throw new Error("static page screenshot must be a regular file");
+    throw new Error(`${label} must be a regular file`);
   }
   const metadata = await sharp(path).metadata();
   if (
     metadata.format !== "png" ||
-    metadata.width !== 1440 ||
-    metadata.height !== 1200
+    metadata.width !== expectedWidth ||
+    metadata.height !== expectedHeight
   ) {
-    throw new Error("static page screenshot must be an exact 1440×1200 PNG");
+    throw new Error(
+      `${label} must be an exact ${String(expectedWidth)}×${String(expectedHeight)} PNG`,
+    );
   }
 }
 
@@ -1174,22 +1183,110 @@ export async function renderStaticPage(
     if (input.verifyGalleryContent === true) {
       await assertGalleryContentVisibility(page, input.challengeConfig);
     }
+    const FULL_HEIGHT_CAP = 12000;
+    const expectedWidth = input.challengeConfig.viewport.width;
+    const expectedViewportHeight = input.challengeConfig.viewport.height;
+    const viewportPath =
+      input.viewportScreenshotPath ??
+      join(dirname(input.screenshotPath), "screenshot-viewport.png");
+    const documentHeight = await page.evaluate(() => {
+      try {
+        const candidates = [
+          document.documentElement?.scrollHeight,
+          document.body?.scrollHeight,
+          document.documentElement?.offsetHeight,
+          document.body?.offsetHeight,
+          document.documentElement?.clientHeight,
+        ];
+        const finite = candidates.filter(
+          (value): value is number =>
+            typeof value === "number" && Number.isFinite(value) && value > 0,
+        );
+        if (finite.length === 0) return window.innerHeight;
+        return Math.max(...finite);
+      } catch {
+        return window.innerHeight;
+      }
+    });
+    const safeHeight = Number.isFinite(documentHeight)
+      ? Math.max(1, Math.floor(documentHeight))
+      : expectedViewportHeight;
+    const cappedHeight = Math.min(safeHeight, FULL_HEIGHT_CAP);
     await mkdir(dirname(input.screenshotPath), { recursive: true });
+    await mkdir(dirname(viewportPath), { recursive: true });
     temporaryScreenshotPath = `${input.screenshotPath}.tmp-${process.pid}-${randomBytes(8).toString("hex")}`;
-    if (options.screenshot === undefined) {
-      await page.screenshot({
-        path: temporaryScreenshotPath,
-        fullPage: false,
-        type: "png",
-      });
-    } else {
-      await options.screenshot(page, temporaryScreenshotPath);
+    const viewportTemporaryPath = `${viewportPath}.tmp-${process.pid}-${randomBytes(8).toString("hex")}`;
+    let viewportTemporaryActive = false;
+    try {
+      if (options.screenshot === undefined) {
+        const cdp = await context.newCDPSession(page);
+        try {
+          const capture = await cdp.send("Page.captureScreenshot", {
+            format: "png",
+            fromSurface: true,
+            captureBeyondViewport: true,
+            clip: { x: 0, y: 0, width: expectedWidth, height: cappedHeight, scale: 1 },
+          });
+          await writeFile(
+            temporaryScreenshotPath,
+            Buffer.from(capture.data as string, "base64"),
+          );
+        } finally {
+          await cdp.detach().catch(() => undefined);
+        }
+        await assertScreenshotDimensions(
+          temporaryScreenshotPath,
+          expectedWidth,
+          cappedHeight,
+          "static page screenshot",
+        );
+        viewportTemporaryActive = true;
+        await page.screenshot({
+          path: viewportTemporaryPath,
+          fullPage: false,
+          type: "png",
+        });
+        await assertScreenshotDimensions(
+          viewportTemporaryPath,
+          expectedWidth,
+          expectedViewportHeight,
+          "static page viewport screenshot",
+        );
+        await rename(temporaryScreenshotPath, input.screenshotPath);
+        temporaryScreenshotPath = null;
+        await rename(viewportTemporaryPath, viewportPath);
+        viewportTemporaryActive = false;
+      } else {
+        await options.screenshot(page, temporaryScreenshotPath);
+        await assertScreenshotDimensions(
+          temporaryScreenshotPath,
+          expectedWidth,
+          cappedHeight,
+          "static page screenshot",
+        );
+        await rename(temporaryScreenshotPath, input.screenshotPath);
+        temporaryScreenshotPath = null;
+      }
+    } catch (error) {
+      if (temporaryScreenshotPath !== null) {
+        await rm(temporaryScreenshotPath, { force: true }).catch(() => undefined);
+        temporaryScreenshotPath = null;
+      }
+      if (viewportTemporaryActive) {
+        await rm(viewportTemporaryPath, { force: true }).catch(() => undefined);
+        viewportTemporaryActive = false;
+      }
+      throw error;
+    } finally {
+      if (viewportTemporaryActive) {
+        await rm(viewportTemporaryPath, { force: true }).catch(() => undefined);
+      }
     }
-    await assertScreenshotDimensions(temporaryScreenshotPath);
-    await rename(temporaryScreenshotPath, input.screenshotPath);
-    temporaryScreenshotPath = null;
     return {
       screenshotPath: input.screenshotPath,
+      ...(options.screenshot === undefined
+        ? { viewportScreenshotPath: viewportPath }
+        : {}),
       externalRequests,
       observedVersions: {
         playwright: NOT_RECORDED,

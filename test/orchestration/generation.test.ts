@@ -1380,7 +1380,7 @@ describe("complete generation orchestration", () => {
       await readFile(join(result.gallery.publicPath, "index.html"), "utf8"),
     ).toContain("No valid judge result");
     expect(await readdir(join(result.gallery.publicPath, "screenshots"))).toHaveLength(
-      3,
+      6,
     );
   }, 30000);
 });

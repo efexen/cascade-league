@@ -33,14 +33,14 @@ You may read both files. Do not modify the HTML or any challenge asset. Do not c
 ## Fixed judging environment
 
 - Chromium
-- Desktop viewport: 1440 × 1200 CSS pixels
+- Desktop viewport: 1280 × 1200 CSS pixels
 - Device scale factor: 1
 - JavaScript disabled
 - Reduced-motion preference enabled
 - Local challenge fonts only
-- The submitted page is captured exactly at the viewport, not as a full-page screenshot
+- The submitted page is captured at its full document height, up to 12,000 pixels, while the 1280-pixel viewport width remains fixed
 
-The masthead, project explanation, rules, and leading leaderboard entries should be understandable within that canvas.
+You may use the page vertically. Required sections and leaderboard entries do not need to fit within the first viewport, provided the complete page remains readable and intentional.
 
 ## Submission rules
 
@@ -108,7 +108,7 @@ Evaluate one candidate page. You do not know which model or harness produced it.
 
 You have received:
 
-1. __BACKTICK__candidate.png__BACKTICK__: the candidate at 1440 × 1200 CSS pixels;
+1. __BACKTICK__candidate.png__BACKTICK__: the candidate's full page at a fixed 1280 CSS-pixel viewport width, captured to its document height up to 12,000 pixels;
 2. __BACKTICK__cohort.png__BACKTICK__: lower-detail anonymous thumbnails of every candidate, used only to assess relative originality; and
 3. __BACKTICK__candidate.css__BACKTICK__: the candidate's CSS with comments removed.
 
@@ -124,7 +124,7 @@ Can a viewer quickly understand the project, rules, leaderboard, and scores? Rew
 
 ### composition — 0 to 15
 
-Judge use of the fixed canvas, spacing, balance, rhythm, density, and relationship between explanation and gallery.
+Judge use of the full page, spacing, balance, rhythm, density, vertical pacing, and relationship between explanation and gallery. Do not penalise content merely for appearing below the first viewport.
 
 ### typography — 0 to 15
 

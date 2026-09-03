@@ -19,7 +19,7 @@ const config = ChallengeConfigSchema.parse({
   starterCss: "starter.css",
   fallbackCss: "fallback.css",
   seedData: "seed/seed-generation.json",
-  viewport: { width: 1440, height: 1200, deviceScaleFactor: 1 },
+  viewport: { width: 1280, height: 1200, deviceScaleFactor: 1 },
   browser: {
     engine: "chromium",
     colorScheme: "light",
@@ -56,24 +56,29 @@ const html = `<!doctype html>
 </ol></section><section id="judge-notes">Notes</section></main></body></html>`;
 
 describe("deterministic candidate rendering", () => {
-  it("captures a valid candidate at the exact configured viewport", async () => {
+  it("captures fixed and full-height views at the configured width", async () => {
     const root = await createTestTempRoot("local-maxima-render-");
     await mkdir(root, { recursive: true });
     await writeFile(join(root, "challenge.html"), html, "utf8");
     await writeFile(
       join(root, "submission.css"),
-      "body { margin: 0; font-family: sans-serif; } .leaderboard-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; } .entry-card { min-height: 180px; border: 1px solid black; }",
+      "body { margin: 0; min-height: 2500px; font-family: sans-serif; } .leaderboard-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; } .entry-card { min-height: 180px; border: 1px solid black; }",
       "utf8",
     );
     const screenshotPath = join(root, "screenshot.png");
+    const viewportScreenshotPath = join(root, "screenshot-viewport.png");
 
     const result = await renderCandidate({
       candidateRootPath: root,
       screenshotPath,
+      viewportScreenshotPath,
       challengeConfig: config,
     });
 
-    expect(result.status).toBe("valid");
+    expect(
+      result.status,
+      `${result.errors.join(" | ")} ${JSON.stringify(result.renderChecks)}`,
+    ).toBe("valid");
     expect(result.externalRequests).toEqual([]);
     expect(result.observedVersions.playwright).toMatch(/^\d+\.\d+\.\d+$/u);
     expect(await readFile(screenshotPath)).toHaveLength(
@@ -81,8 +86,71 @@ describe("deterministic candidate rendering", () => {
     );
     const image = await sharp(screenshotPath).metadata();
     expect(image.format).toBe("png");
-    expect(image.width).toBe(1440);
-    expect(image.height).toBe(1200);
+    expect(image.width).toBe(1280);
+    expect(image.height).toBe(2500);
+    const viewportImage = await sharp(viewportScreenshotPath).metadata();
+    expect(viewportImage.format).toBe("png");
+    expect(viewportImage.width).toBe(1280);
+    expect(viewportImage.height).toBe(1200);
+    expect(result.viewportScreenshotPath).toBe(viewportScreenshotPath);
+  });
+
+  it("caps a full-height candidate screenshot at 12000 pixels", async () => {
+    const root = await createTestTempRoot("cascade-league-render-full-cap-");
+    await writeFile(join(root, "challenge.html"), html, "utf8");
+    await writeFile(
+      join(root, "submission.css"),
+      "body { margin: 0; min-height: 15000px; } .leaderboard-grid { display: grid; grid-template-columns: repeat(3, 1fr); } .entry-card { min-height: 180px; }",
+      "utf8",
+    );
+    const screenshotPath = join(root, "screenshot.png");
+    const viewportScreenshotPath = join(root, "screenshot-viewport.png");
+
+    const result = await renderCandidate({
+      candidateRootPath: root,
+      screenshotPath,
+      viewportScreenshotPath,
+      challengeConfig: config,
+    });
+
+    expect(
+      result.status,
+      `${result.errors.join(" | ")} ${JSON.stringify(result.renderChecks)}`,
+    ).toBe("valid");
+    expect(await sharp(screenshotPath).metadata()).toMatchObject({
+      format: "png",
+      width: 1280,
+      height: 12000,
+    });
+    expect(result.warnings.join(" ")).toContain("15000");
+    expect(result.warnings.join(" ")).toContain("12000");
+  });
+
+  it("warns instead of rejecting when leaderboard entries begin below the first viewport", async () => {
+    const root = await createTestTempRoot("cascade-league-render-below-fold-");
+    await writeFile(join(root, "challenge.html"), html, "utf8");
+    await writeFile(
+      join(root, "submission.css"),
+      "body { margin: 0; } #leaderboard { margin-top: 1400px; } .leaderboard-grid { display: grid; grid-template-columns: repeat(3, 1fr); } .entry-card { min-height: 180px; }",
+      "utf8",
+    );
+
+    const result = await renderCandidate({
+      candidateRootPath: root,
+      screenshotPath: join(root, "screenshot.png"),
+      viewportScreenshotPath: join(root, "screenshot-viewport.png"),
+      challengeConfig: config,
+    });
+
+    expect(
+      result.status,
+      `${result.errors.join(" | ")} ${JSON.stringify(result.renderChecks)}`,
+    ).toBe("valid");
+    expect(
+      result.renderChecks.find((entry) => entry.code === "leading_entries_viewport")
+        ?.status,
+    ).toBe("warning");
+    expect(result.warnings.join(" ")).toContain("first viewport");
   });
 
   it("fails when an ancestor makes the whole page fully transparent", async () => {
@@ -162,7 +230,10 @@ describe("deterministic candidate rendering", () => {
       challengeConfig: config,
     });
 
-    expect(result.status).toBe("valid");
+    expect(
+      result.status,
+      `${result.errors.join(" | ")} ${JSON.stringify(result.renderChecks)}`,
+    ).toBe("valid");
     expect(result.screenshotPath).toBe(screenshotPath);
     expect(
       result.renderChecks.find((entry) => entry.code === "required_content_visibility")

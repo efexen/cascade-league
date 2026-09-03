@@ -59,6 +59,11 @@ describe("Season 1 challenge", () => {
 
   it("renders the seed page with the frozen semantic hooks and configured roster size", async () => {
     const definition = await loadSeasonDefinition(seasonRoot.pathname);
+    expect(definition.config.viewport).toEqual({
+      width: 1280,
+      height: 1200,
+      deviceScaleFactor: 1,
+    });
     const page = await buildSeedChallengePage({
       definition,
       generationId: "0001",
@@ -144,7 +149,7 @@ describe("Season 1 challenge", () => {
           entry.screenshotPath.replace(/^thumbnails\//, "thumbnails/"),
         ),
       ).metadata();
-      expect(metadata.width).toBe(1440);
+      expect(metadata.width).toBe(1280);
       expect(metadata.height).toBe(1200);
       expect(metadata.format).toBe("png");
     }

@@ -238,7 +238,7 @@ export const ChallengeConfigSchema = z
     seedData: RelativePosixPathSchema,
     viewport: z
       .object({
-        width: z.literal(1440),
+        width: z.union([z.literal(1280), z.literal(1440)]),
         height: z.literal(1200),
         deviceScaleFactor: z.literal(1),
       })

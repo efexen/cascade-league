@@ -433,8 +433,12 @@ describe("Wave-B fixture orchestration", () => {
       );
       expect(validation.status).toBe("valid");
       const image = await sharp(join(contestant.path, "screenshot.png")).metadata();
-      expect(image.width).toBe(1440);
-      expect(image.height).toBe(1200);
+      expect(image.width).toBe(1280);
+      expect(image.height).toBeGreaterThanOrEqual(1200);
+      expect(image.height).toBeLessThanOrEqual(12000);
+      await expect(
+        sharp(join(contestant.path, "screenshot-viewport.png")).metadata(),
+      ).resolves.toMatchObject({ format: "png", width: 1280, height: 1200 });
       await expect(readdir(join(contestant.path, "workspace"))).rejects.toThrow();
       expect(await readFile(join(contestant.path, "prompt.md"), "utf8")).toContain(
         join(contestant.path, "workspace/submission.css"),

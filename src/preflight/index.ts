@@ -313,11 +313,16 @@ export async function runRepositoryPreflight(
             join(definition.rootPath, "seed", entry.screenshotPath),
           ).metadata();
           if (
-            metadata.width !== 1440 ||
-            metadata.height !== 1200 ||
+            metadata.width !== definition.config.viewport.width ||
+            metadata.height !== definition.config.viewport.height ||
             metadata.format !== "png"
           ) {
-            issues.push(issue("seed_asset", `${entry.id} is not a 1440×1200 PNG`));
+            issues.push(
+              issue(
+                "seed_asset",
+                `${entry.id} is not a ${String(definition.config.viewport.width)}×${String(definition.config.viewport.height)} PNG`,
+              ),
+            );
           }
         } catch {
           issues.push(

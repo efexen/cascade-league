@@ -187,6 +187,7 @@ const PageEntrySchema = z
     statusLabel: TextSchema(100),
     alt: TextSchema(300),
     screenshotPath: RelativePosixPathSchema,
+    fullScreenshotPath: RelativePosixPathSchema.optional(),
     combinedScoreLabel: DisplayAggregateLabelSchema,
     originalityScoreLabel: DisplayAggregateLabelSchema,
     completedJudgeCount: z.number().int().nonnegative(),

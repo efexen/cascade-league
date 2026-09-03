@@ -2,6 +2,7 @@ import { copyFile, mkdir, readFile, symlink, writeFile } from "node:fs/promises"
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { chromium } from "playwright";
+import sharp from "sharp";
 
 import {
   buildSeedChallengePage,
@@ -68,6 +69,39 @@ async function renderMinimalGallery(extraCss: string) {
 }
 
 describe("static public page renderer", () => {
+  it("captures a bounded full-height public page plus a fixed viewport view", async () => {
+    const root = await createTestTempRoot("cascade-league-static-full-height-");
+    const definition = await loadSeasonDefinition(
+      join(repositoryRoot, "challenge/season-001"),
+    );
+    await writeFile(
+      join(root, "index.html"),
+      '<!doctype html><html><body style="margin:0"><div style="height:2500px">Full page</div></body></html>',
+    );
+    const screenshotPath = join(root, "screenshot.png");
+    const viewportScreenshotPath = join(root, "screenshot-viewport.png");
+
+    const result = await renderStaticPage({
+      rootPath: root,
+      entryFile: "index.html",
+      screenshotPath,
+      viewportScreenshotPath,
+      challengeConfig: definition.config,
+    });
+
+    expect(await sharp(screenshotPath).metadata()).toMatchObject({
+      format: "png",
+      width: 1280,
+      height: 2500,
+    });
+    expect(await sharp(viewportScreenshotPath).metadata()).toMatchObject({
+      format: "png",
+      width: 1280,
+      height: 1200,
+    });
+    expect(result.viewportScreenshotPath).toBe(viewportScreenshotPath);
+  });
+
   it("rejects transparent public matrix and operational text", async () => {
     await expect(
       renderMinimalGallery(
@@ -412,7 +446,7 @@ describe("static public page renderer", () => {
     const browser = await chromium.launch();
     try {
       const browserPage = await browser.newPage({
-        viewport: { width: 1440, height: 1200 },
+        viewport: { width: 1280, height: 1200 },
         javaScriptEnabled: false,
       });
       await browserPage.goto(`file://${join(root, "index.html")}`, {

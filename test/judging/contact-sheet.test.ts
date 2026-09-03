@@ -15,7 +15,7 @@ describe("anonymous contact sheets", () => {
       ["#cc5544", "#3366aa", "#449966"].map(async (background, index) => {
         const path = join(root, `candidate-${index + 1}.png`);
         await sharp({
-          create: { width: 1440, height: 1200, channels: 4, background },
+          create: { width: 1280, height: 2400, channels: 4, background },
         })
           .png()
           .toFile(path);
@@ -93,7 +93,7 @@ describe("anonymous contact sheets", () => {
     const root = await createTestTempRoot("local-maxima-contact-sheet-failure-");
     const screenshotPath = join(root, "candidate.png");
     await sharp({
-      create: { width: 1440, height: 1200, channels: 4, background: "#3366aa" },
+      create: { width: 1280, height: 2400, channels: 4, background: "#3366aa" },
     })
       .png()
       .toFile(screenshotPath);
@@ -125,7 +125,7 @@ describe("anonymous contact sheets", () => {
     const root = await createTestTempRoot("local-maxima-contact-order-failure-");
     const screenshotPath = join(root, "candidate.png");
     await sharp({
-      create: { width: 1440, height: 1200, channels: 4, background: "#3366aa" },
+      create: { width: 1280, height: 2400, channels: 4, background: "#3366aa" },
     })
       .png()
       .toFile(screenshotPath);

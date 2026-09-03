@@ -69,11 +69,10 @@ function matrixMarkup(html: string): string {
 }
 
 async function expectExactScreenshot(path: string): Promise<void> {
-  await expect(sharp(path).metadata()).resolves.toMatchObject({
-    format: "png",
-    width: 1440,
-    height: 1200,
-  });
+  const metadata = await sharp(path).metadata();
+  expect(metadata).toMatchObject({ format: "png", width: 1280 });
+  expect(metadata.height).toBeGreaterThanOrEqual(1200);
+  expect(metadata.height).toBeLessThanOrEqual(12000);
 }
 
 describe("Phase 2 gallery acceptance", () => {
@@ -121,7 +120,7 @@ describe("Phase 2 gallery acceptance", () => {
     );
 
     expect(manifest.status).toBe("completed");
-    expect(manifest.challengeVersion).toBe("1.1.0");
+    expect(manifest.challengeVersion).toBe("1.2.0");
     expect(manifest.contestantIds).toEqual([
       "fixture-editorial",
       "fixture-geometric",
@@ -221,8 +220,19 @@ describe("Phase 2 gallery acceptance", () => {
       await expectExactScreenshot(
         join(generation.generationPath, `contestants/${contestantId}/screenshot.png`),
       );
+      await expect(
+        sharp(
+          join(
+            generation.generationPath,
+            `contestants/${contestantId}/screenshot-viewport.png`,
+          ),
+        ).metadata(),
+      ).resolves.toMatchObject({ format: "png", width: 1280, height: 1200 });
     }
     await expectExactScreenshot(result.gallery.screenshotPath);
+    await expect(
+      sharp(join(result.gallery.publicPath, "gallery-viewport.png")).metadata(),
+    ).resolves.toMatchObject({ format: "png", width: 1280, height: 1200 });
 
     const champion = leaderboard.entries.find((entry) => entry.rank === 1);
     expect(champion).toBeDefined();

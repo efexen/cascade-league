@@ -2,6 +2,7 @@ import { cp, chmod, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { chromium } from "playwright";
 import sharp from "sharp";
 
 import { createGeneration } from "../../src/artifacts/generation.js";
@@ -890,18 +891,39 @@ describe("static public gallery", () => {
       await sharp(
         join(generation.generationPath, "public/gallery-screenshot.png"),
       ).metadata(),
-    ).toMatchObject({ format: "png", width: 1440, height: 1200 });
+    ).toMatchObject({ format: "png", width: 1280 });
+    expect(
+      (
+        await sharp(
+          join(generation.generationPath, "public/gallery-screenshot.png"),
+        ).metadata()
+      ).height,
+    ).toBeGreaterThan(1200);
+    expect(
+      await sharp(
+        join(generation.generationPath, "public/gallery-viewport.png"),
+      ).metadata(),
+    ).toMatchObject({ format: "png", width: 1280, height: 1200 });
     expect((await readdir(join(generation.generationPath, "public"))).sort()).toEqual([
       "champion.css",
       "fonts",
+      "gallery-layout.css",
       "gallery-screenshot.png",
+      "gallery-viewport.png",
       "index.html",
       "metadata.json",
       "screenshots",
     ]);
     expect(
-      await readdir(join(generation.generationPath, "public/screenshots")),
-    ).toEqual(["entry-001.png", "entry-002.png", "entry-003.png"]);
+      (await readdir(join(generation.generationPath, "public/screenshots"))).sort(),
+    ).toEqual([
+      "entry-001-full.png",
+      "entry-001.png",
+      "entry-002-full.png",
+      "entry-002.png",
+      "entry-003-full.png",
+      "entry-003.png",
+    ]);
     expect(
       (await readdir(join(generation.generationPath, "public/fonts"))).every((file) =>
         file.endsWith(".ttf"),
@@ -918,6 +940,82 @@ describe("static public gallery", () => {
         expect.objectContaining({ name: "raw" }),
       ]),
     );
+  }, 30000);
+
+  it("uses viewport captures for card previews and links to full designs", async () => {
+    const generationsRoot = await createTestTempRoot("cascade-gallery-design-preview-");
+    const { generation, result } =
+      await createCompletedFixtureGeneration(generationsRoot);
+    const firstEntry = result.leaderboard.entries[0];
+    expect(firstEntry).toBeDefined();
+    if (firstEntry === undefined) throw new Error("fixture generation has no entries");
+
+    const previewPath = join(
+      generation.generationPath,
+      "public/screenshots/entry-001.png",
+    );
+    const fullPath = join(
+      generation.generationPath,
+      "public/screenshots/entry-001-full.png",
+    );
+    await expect(sharp(previewPath).metadata()).resolves.toMatchObject({
+      format: "png",
+      width: 1280,
+      height: 1200,
+    });
+    const fullMetadata = await sharp(fullPath).metadata();
+    expect(fullMetadata).toMatchObject({ format: "png", width: 1280 });
+    expect(fullMetadata.height).toBeGreaterThan(1200);
+
+    const html = await readFile(join(result.gallery.publicPath, "index.html"), "utf8");
+    expect(html).toContain('src="screenshots/entry-001.png"');
+    expect(html).toContain('href="screenshots/entry-001-full.png"');
+    expect(html).toMatch(/View\s+full design/u);
+
+    const leaderboardMarkup = html.match(
+      /<section[^>]+id="leaderboard"[\s\S]*?<\/section>/u,
+    )?.[0];
+    expect(leaderboardMarkup).toBeDefined();
+    expect(leaderboardMarkup).toContain("Combined");
+    expect(leaderboardMarkup).toContain("Originality");
+    expect(leaderboardMarkup).not.toContain("Runtime");
+    expect(leaderboardMarkup).not.toContain("Estimated cost");
+    expect(leaderboardMarkup).not.toContain("Hierarchy");
+
+    const judgeNotesMarkup = html.match(
+      /<section[^>]+id="judge-notes"[\s\S]*?<\/section>/u,
+    )?.[0];
+    expect(judgeNotesMarkup).toContain("Runtime");
+    expect(judgeNotesMarkup).toContain("Estimated cost");
+
+    expect(html).toContain('href="gallery-layout.css"');
+    await expect(
+      readFile(join(result.gallery.publicPath, "gallery-layout.css"), "utf8"),
+    ).resolves.toContain(".leaderboard-grid");
+
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
+      await page.goto(`file://${join(result.gallery.publicPath, "index.html")}`);
+      const cards = await page.locator(".entry-card").evaluateAll((nodes) =>
+        nodes.map((node) => {
+          const card = node.getBoundingClientRect();
+          const visual = node.querySelector(".entry-visual")!.getBoundingClientRect();
+          return {
+            top: card.top,
+            bottom: card.bottom,
+            left: card.left,
+            screenshotShare: visual.height / card.height,
+          };
+        }),
+      );
+      expect(cards).toHaveLength(3);
+      expect(cards[1]!.top).toBeGreaterThan(cards[0]!.bottom);
+      expect(cards[1]!.left).toBe(cards[0]!.left);
+      expect(cards.every((card) => card.screenshotShare >= 0.88)).toBe(true);
+    } finally {
+      await browser.close();
+    }
   }, 30000);
 
   it("escapes model strings while preserving the script-free local-resource policy", async () => {
