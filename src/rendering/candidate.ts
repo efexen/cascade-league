@@ -20,6 +20,7 @@ import {
   startLoopbackStaticServer,
   type LoopbackStaticServer,
 } from "./static-server.js";
+import { publishFilePairAtomically } from "./atomic-pair.js";
 
 const NOT_RECORDED = "not-recorded";
 const EFFECTIVE_OPACITY_EPSILON = 0.001;
@@ -59,6 +60,7 @@ export interface CandidateRendererOptions {
   readonly launchBrowser?: () => Promise<Browser>;
   readonly startServer?: typeof startLoopbackStaticServer;
   readonly screenshot?: (page: Page, path: string) => Promise<void>;
+  readonly moveFile?: typeof rename;
 }
 
 interface RenderWorkspace {
@@ -501,19 +503,23 @@ export async function renderCandidate(
         if (options.screenshot === undefined) {
           const expectedWidth = input.challengeConfig.viewport.width;
           const cdp = await context.newCDPSession(page);
-          const capture = await cdp.send("Page.captureScreenshot", {
-            format: "png",
-            fromSurface: true,
-            captureBeyondViewport: true,
-            clip: {
-              x: 0,
-              y: 0,
-              width: expectedWidth,
-              height: cappedHeight,
-              scale: 1,
-            },
-          });
-          await cdp.detach();
+          let capture: { data: string };
+          try {
+            capture = await cdp.send("Page.captureScreenshot", {
+              format: "png",
+              fromSurface: true,
+              captureBeyondViewport: true,
+              clip: {
+                x: 0,
+                y: 0,
+                width: expectedWidth,
+                height: cappedHeight,
+                scale: 1,
+              },
+            });
+          } finally {
+            await cdp.detach().catch(() => undefined);
+          }
           await writeFile(screenshotTemporaryPath, Buffer.from(capture.data, "base64"));
           const image = await sharp(screenshotTemporaryPath).metadata();
           viewportTemporaryActive = true;
@@ -565,9 +571,16 @@ export async function renderCandidate(
             await rm(viewportTemporaryPath, { force: true });
             viewportTemporaryActive = false;
           } else if (errors.length === 0 && screenshotTemporaryPath !== null) {
-            await rename(screenshotTemporaryPath, input.screenshotPath);
+            await publishFilePairAtomically(
+              {
+                firstTemporaryPath: screenshotTemporaryPath,
+                firstDestinationPath: input.screenshotPath,
+                secondTemporaryPath: viewportTemporaryPath,
+                secondDestinationPath: viewportPath,
+              },
+              options.moveFile === undefined ? {} : { moveFile: options.moveFile },
+            );
             screenshotTemporaryPath = null;
-            await rename(viewportTemporaryPath, viewportPath);
             viewportTemporaryActive = false;
           } else {
             await rm(viewportTemporaryPath, { force: true });

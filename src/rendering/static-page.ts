@@ -10,6 +10,7 @@ import {
   startLoopbackStaticServer,
   type LoopbackStaticServer,
 } from "./static-server.js";
+import { publishFilePairAtomically } from "./atomic-pair.js";
 
 const NOT_RECORDED = "not-recorded";
 
@@ -26,6 +27,7 @@ export interface StaticPageRenderOptions {
   readonly launchBrowser?: () => Promise<Browser>;
   readonly startServer?: typeof startLoopbackStaticServer;
   readonly screenshot?: (page: Page, path: string) => Promise<void>;
+  readonly moveFile?: typeof rename;
 }
 
 export interface StaticPageRenderResult {
@@ -1252,9 +1254,16 @@ export async function renderStaticPage(
           expectedViewportHeight,
           "static page viewport screenshot",
         );
-        await rename(temporaryScreenshotPath, input.screenshotPath);
+        await publishFilePairAtomically(
+          {
+            firstTemporaryPath: temporaryScreenshotPath,
+            firstDestinationPath: input.screenshotPath,
+            secondTemporaryPath: viewportTemporaryPath,
+            secondDestinationPath: viewportPath,
+          },
+          options.moveFile === undefined ? {} : { moveFile: options.moveFile },
+        );
         temporaryScreenshotPath = null;
-        await rename(viewportTemporaryPath, viewportPath);
         viewportTemporaryActive = false;
       } else {
         await options.screenshot(page, temporaryScreenshotPath);
