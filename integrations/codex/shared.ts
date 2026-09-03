@@ -221,7 +221,36 @@ export interface CodexProcessInput {
   readonly prompt: string;
 }
 
+export const MAX_CODEX_STDERR_RETAINED_BYTES = 2048;
+
+function appendBoundedTail(
+  current: Buffer,
+  chunk: Buffer,
+  maximumBytes: number,
+): Buffer {
+  if (chunk.byteLength >= maximumBytes) {
+    return Buffer.from(chunk.subarray(chunk.byteLength - maximumBytes));
+  }
+  const combined = current.byteLength === 0 ? chunk : Buffer.concat([current, chunk]);
+  return combined.byteLength > maximumBytes
+    ? Buffer.from(combined.subarray(combined.byteLength - maximumBytes))
+    : combined;
+}
+
+function codexStderrDiagnostic(captured: Buffer, seenBytes: number): string {
+  const collapsed = new TextDecoder("utf-8")
+    .decode(captured)
+    .replace(/[\p{Cc}]+/gu, " ")
+    .trim();
+  if (collapsed.length === 0) return JSON.stringify("no stderr output");
+  const text =
+    seenBytes > captured.byteLength ? `... [truncated] ${collapsed}` : collapsed;
+  return JSON.stringify(text);
+}
+
 export async function invokeCodex(input: CodexProcessInput): Promise<void> {
+  let stderrRetained: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+  let stderrSeenBytes = 0;
   const result = await new Promise<{
     readonly exitCode: number | null;
     readonly signal: NodeJS.Signals | null;
@@ -255,9 +284,17 @@ export async function invokeCodex(input: CodexProcessInput): Promise<void> {
       return;
     }
 
-    // Codex progress is deliberately not copied into the wrapper's output;
-    // drain the pipe so a noisy failed invocation cannot block on stderr.
-    child.stderr?.resume();
+    // Codex progress is deliberately not copied into the wrapper's output; keep
+    // only a bounded stderr tail and drain the pipe so a noisy failed
+    // invocation cannot block on stderr.
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderrSeenBytes += chunk.byteLength;
+      stderrRetained = appendBoundedTail(
+        stderrRetained,
+        chunk,
+        MAX_CODEX_STDERR_RETAINED_BYTES,
+      );
+    });
     child.once("error", (error) => {
       settle({
         exitCode: null,
@@ -278,7 +315,12 @@ export async function invokeCodex(input: CodexProcessInput): Promise<void> {
     throw new Error(`codex terminated by ${result.signal}`);
   }
   if (result.exitCode !== 0) {
-    throw new Error(`codex exited with code ${String(result.exitCode)}`);
+    throw new Error(
+      `codex exited with code ${String(result.exitCode)}; stderr: ${codexStderrDiagnostic(
+        stderrRetained,
+        stderrSeenBytes,
+      )}`,
+    );
   }
 }
 

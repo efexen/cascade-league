@@ -221,6 +221,21 @@ if (process.argv.length === 3 && process.argv[2] === "--version") {
 appendFileSync(join(process.cwd(), "stub-calls.log"), "call\n");
 `;
 
+const STDERR_DIAGNOSTIC_MARKER = "codex-stderr-marker-4f9c1a";
+
+const NOISY_FAILING_STUB = String.raw`
+import { appendFileSync } from "node:fs";
+import { join } from "node:path";
+if (process.argv.length === 3 && process.argv[2] === "--version") {
+  process.stdout.write("codex-cli 0.150.1\n");
+  process.exit(0);
+}
+appendFileSync(join(process.cwd(), "stub-calls.log"), "call\n");
+process.stderr.write("x".repeat(4096) + "\n");
+process.stderr.write("rejection reason ${STDERR_DIAGNOSTIC_MARKER}\n");
+process.exit(23);
+`;
+
 describe("Codex CLI integration contracts", () => {
   it("records the actual Codex executable version", async () => {
     const root = await mkdtemp(join(tmpdir(), "cascade-league-codex-version-"));
@@ -410,6 +425,77 @@ describe("Codex CLI integration contracts", () => {
     expect(await readFile(join(root, "stderr.log"), "utf8")).toContain(
       "codex exited with code 23",
     );
+    expect(
+      (await readFile(join(workspace, "stub-calls.log"), "utf8")).trim().split("\n"),
+    ).toHaveLength(1);
+  });
+
+  it("surfaces a bounded Codex stderr diagnostic exactly once on transport failure", async () => {
+    const root = await mkdtemp(
+      join(tmpdir(), "cascade-league-codex-stderr-diagnostic-"),
+    );
+    const workspace = await prepareWorkspace(root, "workspace");
+    const stubPath = await writeStub(root, NOISY_FAILING_STUB);
+    const challengePath = join(workspace, "challenge.html");
+    const starterCssPath = join(workspace, "starter.css");
+    const promptPath = join(workspace, "prompt.md");
+    const submissionPath = join(workspace, "submission.css");
+    await writeFile(challengePath, "<!doctype html>", "utf8");
+    await writeFile(starterCssPath, ":root {}\n", "utf8");
+    await writeFile(promptPath, "DIAGNOSTIC PROMPT\n", "utf8");
+
+    const command = [
+      ...wrapperCommand("contestant.ts"),
+      "--codex-path",
+      stubPath,
+      "--codex-version",
+      "0.150.1",
+      "--model",
+      "gpt-5.6",
+      "--reasoning-effort",
+      "high",
+      "--workspace-path",
+      "{workspacePath}",
+      "--challenge-path",
+      "{challengePath}",
+      "--starter-css-path",
+      "{starterCssPath}",
+      "--prompt-path",
+      "{promptPath}",
+      "--submission-path",
+      "{submissionPath}",
+    ];
+    const result = await new CommandContestantAdapter({
+      environment: {
+        HOME: root,
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+      },
+    }).run({
+      generationId: "0001",
+      contestantId: "codex-contestant",
+      anonymousCandidateId: "candidate-abcd",
+      contestant: contestantConfig(command),
+      workspacePath: workspace,
+      challengePath,
+      starterCssPath,
+      promptPath,
+      submissionPath,
+      usageOutputPath: join(workspace, "usage.json"),
+      executionMetadataOutputPath: join(workspace, "execution-metadata.json"),
+      stdoutLogPath: join(root, "stdout.log"),
+      stderrLogPath: join(root, "stderr.log"),
+      timeoutMs: 10_000,
+      maximumTotalTokens: 30_000,
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.attemptCount).toBe(1);
+    const stderrLog = await readFile(join(root, "stderr.log"), "utf8");
+    expect(stderrLog).toContain("codex exited with code 23");
+    expect(stderrLog).toContain(`rejection reason ${STDERR_DIAGNOSTIC_MARKER}`);
+    expect(stderrLog.split(STDERR_DIAGNOSTIC_MARKER).length - 1).toBe(1);
+    expect(stderrLog).not.toContain("x".repeat(2048));
+    expect(stderrLog.length).toBeLessThan(4096);
     expect(
       (await readFile(join(workspace, "stub-calls.log"), "utf8")).trim().split("\n"),
     ).toHaveLength(1);
