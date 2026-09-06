@@ -130,6 +130,10 @@ function publicFullScreenshotName(index: number): string {
   return `screenshots/entry-${String(index + 1).padStart(3, "0")}-full.png`;
 }
 
+function publicDesignPath(contestantId: string): string {
+  return `designs/${contestantId}/index.html`;
+}
+
 async function assertRegularFile(path: string, description: string): Promise<void> {
   const status = await lstat(path);
   if (status.isSymbolicLink() || !status.isFile()) {
@@ -195,6 +199,61 @@ async function copyFonts(sourceRoot: string, destinationRoot: string): Promise<v
     await assertRegularFile(sourcePath, `challenge font ${entry.name}`);
     await copyFile(sourcePath, join(destinationRoot, entry.name));
   }
+}
+
+async function copyPngAssets(
+  sourceRoot: string,
+  destinationRoot: string,
+): Promise<void> {
+  await mkdir(destinationRoot, { recursive: true });
+  const entries = await readdir(sourceRoot, { withFileTypes: true });
+  for (const entry of entries.sort((left, right) =>
+    left.name.localeCompare(right.name),
+  )) {
+    if (!entry.name.toLowerCase().endsWith(".png")) continue;
+    const sourcePath = join(sourceRoot, entry.name);
+    await assertRegularFile(sourcePath, `challenge image ${entry.name}`);
+    await copyFile(sourcePath, join(destinationRoot, entry.name));
+  }
+}
+
+async function stagePublicDesign(
+  generationPath: string,
+  temporaryPath: string,
+  contestantId: string,
+): Promise<string> {
+  const contestantRoot = join(generationPath, "contestants", contestantId);
+  const validation = await readJsonWithSchema(
+    join(contestantRoot, "validation.json"),
+    ValidationSchema,
+  );
+  if (validation.status !== "valid" || validation.sanitisedSha256 === null) {
+    throw new Error(`candidate ${contestantId} does not have validated sanitised CSS`);
+  }
+  const sanitisedPath = join(contestantRoot, "sanitised.css");
+  await assertRegularFile(sanitisedPath, `candidate ${contestantId} sanitised.css`);
+  const sanitisedCss = await readFile(sanitisedPath);
+  if (sha256(sanitisedCss) !== validation.sanitisedSha256) {
+    throw new Error(
+      `candidate ${contestantId} sanitised.css failed its validation hash check`,
+    );
+  }
+
+  const relativePath = publicDesignPath(contestantId);
+  const destinationRoot = dirname(join(temporaryPath, relativePath));
+  const challengeRoot = join(generationPath, "challenge");
+  await mkdir(destinationRoot, { recursive: true });
+  await copyFile(
+    join(challengeRoot, "challenge.html"),
+    join(temporaryPath, relativePath),
+  );
+  await writeBytesAtomically(join(destinationRoot, "submission.css"), sanitisedCss);
+  await copyFonts(join(challengeRoot, "fonts"), join(destinationRoot, "fonts"));
+  await copyPngAssets(
+    join(challengeRoot, "thumbnails"),
+    join(destinationRoot, "thumbnails"),
+  );
+  return relativePath;
 }
 
 async function writeJson(path: string, value: unknown): Promise<void> {
@@ -553,7 +612,7 @@ function pageEntries(
     { readonly runtimeLabel: string; readonly estimatedCostLabel: string }
   >,
   screenshotPaths: readonly string[],
-  fullScreenshotPaths: readonly (string | null)[],
+  fullDesignPaths: readonly (string | null)[],
   statusLabels: GalleryStaticCopy["statusLabels"],
 ): PageEntry[] {
   return leaderboard.entries.map((entry, index) => ({
@@ -569,9 +628,13 @@ function pageEntries(
         ? `No screenshot available for ${entry.displayName}`
         : `${entry.displayName} candidate screenshot`,
     screenshotPath: screenshotPaths[index]!,
-    ...(fullScreenshotPaths[index] === null
+    ...(fullDesignPaths[index] === null
       ? {}
-      : { fullScreenshotPath: fullScreenshotPaths[index]! }),
+      : {
+          // Historical archived templates used this field as their action URL.
+          fullScreenshotPath: fullDesignPaths[index]!,
+          fullDesignPath: fullDesignPaths[index]!,
+        }),
     combinedScoreLabel: scoreLabel(entry.combinedScore),
     originalityScoreLabel: scoreLabel(entry.originalityScore),
     completedJudgeCount: entry.completedJudgeCount,
@@ -712,7 +775,7 @@ export async function buildGallery(
     `.${basename(publicPath)}.build-${randomBytes(8).toString("hex")}`,
   );
   const screenshotPaths: string[] = [];
-  const fullScreenshotPaths: Array<string | null> = [];
+  const fullDesignPaths: Array<string | null> = [];
   try {
     await mkdir(join(temporaryPath, "screenshots"), { recursive: true });
     await copyFonts(
@@ -766,7 +829,9 @@ export async function buildGallery(
           challengeConfig.viewport.height,
           challengeConfig.viewport.height,
         );
-        fullScreenshotPaths.push(fullRelativePath);
+        fullDesignPaths.push(
+          await stagePublicDesign(generationPath, temporaryPath, entry.contestantId),
+        );
       } else {
         const seedEntry =
           definition.seed.entries[index % definition.seed.entries.length]!;
@@ -778,7 +843,7 @@ export async function buildGallery(
           challengeConfig.viewport.height,
           12_000,
         );
-        fullScreenshotPaths.push(null);
+        fullDesignPaths.push(null);
       }
       screenshotPaths.push(publicRelativePath);
     }
@@ -813,7 +878,7 @@ export async function buildGallery(
           judgeNames,
           presentation.operationalLabelsByContestant,
           screenshotPaths,
-          fullScreenshotPaths,
+          fullDesignPaths,
           definition.staticCopy.statusLabels,
         ),
         judgeMatrix: presentation.judgeMatrix,

@@ -55,6 +55,7 @@ async function appendChampionCss(
     Buffer.from(`\n${cssRule}\n`, "utf8"),
   ]);
   await writeFile(submissionPath, submission);
+  await writeFile(join(contestantPath, "sanitised.css"), submission);
   const submissionSha256 = createHash("sha256").update(submission).digest("hex");
   const validationPath = join(contestantPath, "validation.json");
   const validation = ValidationSchema.parse(
@@ -906,6 +907,7 @@ describe("static public gallery", () => {
     ).toMatchObject({ format: "png", width: 1280, height: 1200 });
     expect((await readdir(join(generation.generationPath, "public"))).sort()).toEqual([
       "champion.css",
+      "designs",
       "fonts",
       "gallery-layout.css",
       "gallery-screenshot.png",
@@ -968,9 +970,36 @@ describe("static public gallery", () => {
     expect(fullMetadata.height).toBeGreaterThan(1200);
 
     const html = await readFile(join(result.gallery.publicPath, "index.html"), "utf8");
+    const designPath = `designs/${firstEntry.contestantId}`;
     expect(html).toContain('src="screenshots/entry-001.png"');
-    expect(html).toContain('href="screenshots/entry-001-full.png"');
+    expect(html).toContain(`href="${designPath}/index.html"`);
+    expect(html).not.toContain('href="screenshots/entry-001-full.png"');
     expect(html).toMatch(/View\s+full design/u);
+    await expect(
+      readFile(join(result.gallery.publicPath, designPath, "index.html")),
+    ).resolves.toEqual(
+      await readFile(join(generation.generationPath, "challenge/challenge.html")),
+    );
+    await expect(
+      readFile(join(result.gallery.publicPath, designPath, "submission.css")),
+    ).resolves.toEqual(
+      await readFile(
+        join(
+          generation.generationPath,
+          "contestants",
+          firstEntry.contestantId,
+          "sanitised.css",
+        ),
+      ),
+    );
+    await expect(
+      readFile(
+        join(result.gallery.publicPath, designPath, "fonts/lm-display-sans.ttf"),
+      ),
+    ).resolves.toBeInstanceOf(Buffer);
+    await expect(
+      readFile(join(result.gallery.publicPath, designPath, "thumbnails/seed-01.png")),
+    ).resolves.toBeInstanceOf(Buffer);
 
     const leaderboardMarkup = html.match(
       /<section[^>]+id="leaderboard"[\s\S]*?<\/section>/u,
