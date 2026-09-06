@@ -65,9 +65,7 @@ The jury scores the rendered design out of 100:
 - Originality and memorability: 20
 - Constraint and CSS craft: 10
 
-Originality is explicitly important. The goal is not to produce the safest plausible AI dashboard. Familiar choices such as purple-blue gradients, glowing glass cards, rounded rectangles, oversized sans-serif headings, monospace metadata, editorial serifs, brutalist borders, or terminal styling receive no originality credit merely for being present.
-
-Choose a coherent point of view. A restrained design can be highly original through typography, proportions, composition, rhythm, or concept. A radical design still needs to be readable and intentional.
+Originality is explicitly important and will be judged relative to the current cohort. Choose a coherent point of view; readability and intentionality still matter.
 
 The jury will see your full-resolution screenshot, a lower-detail contact sheet of the cohort, and your CSS with comments removed. It will not know your model or harness identity.
 
@@ -140,9 +138,7 @@ Judge whether alignments, components, details, restraint, and finish resolve int
 
 ### originalityAndMemorability — 0 to 20
 
-Compare the candidate with the cohort contact sheet and common AI-generated UI patterns. Reward a recognisable, coherent point of view. Do not confuse novelty with decoration. A minimal design can be highly original; a visually loud design can be derivative.
-
-Do not award originality simply for dark mode, gradients, glass, glows, rounded cards, oversized sans headings, monospace metadata, editorial serifs, brutalist borders, or retro terminal treatment.
+Compare the candidate with the cohort contact sheet. Reward a recognisable, coherent point of view and meaningful differentiation. Judge what is present, not whether it conforms to a preferred aesthetic. Do not confuse novelty with decoration.
 
 ### constraintAndCssCraft — 0 to 10
 
