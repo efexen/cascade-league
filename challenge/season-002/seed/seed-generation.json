@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "seasonId": "0002",
+  "generationId": null,
+  "generatedAt": "2026-08-01T00:00:00.000Z",
+  "entries": [
+    {
+      "id": "seed-01",
+      "screenshotPath": "thumbnails/seed-01.png",
+      "alt": "Neutral seed composition one"
+    },
+    {
+      "id": "seed-02",
+      "screenshotPath": "thumbnails/seed-02.png",
+      "alt": "Neutral seed composition two"
+    },
+    {
+      "id": "seed-03",
+      "screenshotPath": "thumbnails/seed-03.png",
+      "alt": "Neutral seed composition three"
+    },
+    {
+      "id": "seed-04",
+      "screenshotPath": "thumbnails/seed-04.png",
+      "alt": "Neutral seed composition four"
+    },
+    {
+      "id": "seed-05",
+      "screenshotPath": "thumbnails/seed-05.png",
+      "alt": "Neutral seed composition five"
+    },
+    {
+      "id": "seed-06",
+      "screenshotPath": "thumbnails/seed-06.png",
+      "alt": "Neutral seed composition six"
+    }
+  ]
+}

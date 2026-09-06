@@ -1,0 +1,32 @@
+schemaVersion: 1
+seasonId: "0002"
+title: Cascade League
+challengeVersion: 2.0.0
+template: challenge.hbs
+starterCss: starter.css
+fallbackCss: fallback.css
+seedData: seed/seed-generation.json
+viewport:
+  width: 1280
+  height: 1200
+  deviceScaleFactor: 1
+browser:
+  engine: chromium
+  colorScheme: light
+  reducedMotion: reduce
+  locale: en-GB
+  timezoneId: UTC
+  javaScriptEnabled: false
+submission:
+  filename: submission.css
+  maximumBytes: 61440
+  allowImports: false
+  allowRemoteUrls: false
+  allowDataUrls: false
+requiredSelectors:
+  - "#masthead"
+  - "#introduction"
+  - "#rules"
+  - "#leaderboard"
+  - ".entry-card"
+  - "#judge-notes"
