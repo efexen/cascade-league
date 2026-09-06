@@ -22,10 +22,11 @@ Judge what is present, not whether it conforms to a preferred aesthetic. Do not 
 novelty with decoration. ### constraintAndCssCraft — 0 to 10 Judge whether the CSS uses
 the supplied semantic DOM intelligently, supports the design cleanly, and avoids
 brittleness or complexity. ## Critique Write a direct, specific free-form critique of
-two to four sentences and no more than 500 characters. It must identify what works and
-what most limits the design. End with an actionable next direction when practical. Do
-not mention or guess the contestant identity. ## Output Return exactly one JSON object
-matching this shape, with no Markdown fences and no extra prose: ```json {
+two to three short sentences and no more than 420 characters. The validator enforces a
+hard 500-character schema limit, so leave comfortable headroom. It must identify what
+works and what most limits the design. End with an actionable next direction when
+practical. Do not mention or guess the contestant identity. ## Output Return exactly one
+JSON object matching this shape, with no Markdown fences and no extra prose: ```json {
 "schemaVersion": 1, "generationId": "[GENERATION_ID]", "judgeId": "[JUDGE_ID]",
 "anonymousCandidateId": "[ANONYMOUS_CANDIDATE_ID]", "scores": {
 "hierarchyAndReadability": 0, "composition": 0, "typography": 0,

@@ -1,0 +1,41 @@
+/* Local challenge fonts. Contestants may replace the rest of this file. */
+@font-face {
+  font-family: "LM Neutral Sans";
+  src: url("fonts/lm-neutral-sans.ttf") format("truetype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "LM Display Sans";
+  src: url("fonts/lm-display-sans.ttf") format("truetype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "LM Readable Serif";
+  src: url("fonts/lm-readable-serif.ttf") format("truetype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "LM Expressive Serif";
+  src: url("fonts/lm-expressive-serif.ttf") format("truetype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "LM Mono";
+  src: url("fonts/lm-mono.ttf") format("truetype");
+  font-display: swap;
+}
+
+/* Major DOM hooks: #cascade-league, .page-shell, #masthead, #introduction,
+   #rules, #leaderboard, .entry-card, .entry-runtime, .entry-estimated-cost,
+   #awards, #method, #judge-notes, .judge-matrix, .judge-matrix-row,
+   .judge-matrix-cell, .judge-matrix-combined, .judge-matrix-range,
+   #site-footer. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}

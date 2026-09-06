@@ -61,6 +61,8 @@ describe("contestant prompt contract", () => {
     expect(candidatePrompt).toContain("anonymous design judge for Cascade League");
     expect(candidatePrompt).not.toContain("Local Maxima");
     expect(candidatePrompt).not.toContain("modelUsage");
+    expect(candidatePrompt).toContain("no more than 420 characters");
+    expect(candidatePrompt).toContain("hard 500-character schema limit");
     expect(candidatePrompt).not.toContain("fixture-editorial");
     expect(awardsPrompt).toContain("candidate-abcd");
     expect(awardsPrompt).toContain(

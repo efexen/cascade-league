@@ -146,7 +146,7 @@ Judge whether the CSS uses the supplied semantic DOM intelligently, supports the
 
 ## Critique
 
-Write a direct, specific free-form critique of two to four sentences and no more than 500 characters. It must identify what works and what most limits the design. End with an actionable next direction when practical. Do not mention or guess the contestant identity.
+Write a direct, specific free-form critique of two to three short sentences and no more than 420 characters. The validator enforces a hard 500-character schema limit, so leave comfortable headroom. It must identify what works and what most limits the design. End with an actionable next direction when practical. Do not mention or guess the contestant identity.
 
 ## Output
 
