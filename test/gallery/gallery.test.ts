@@ -926,11 +926,15 @@ describe("static public gallery", () => {
       "entry-003-full.png",
       "entry-003.png",
     ]);
+    const publicFontFiles = await readdir(
+      join(generation.generationPath, "public/fonts"),
+    );
     expect(
-      (await readdir(join(generation.generationPath, "public/fonts"))).every((file) =>
-        file.endsWith(".ttf"),
+      publicFontFiles.every(
+        (file) => file.endsWith(".ttf") || /^OFL-[a-z0-9.-]+\.txt$/iu.test(file),
       ),
     ).toBe(true);
+    expect(publicFontFiles).toContain("OFL-1.1.txt");
     expect(
       await readdir(join(generation.generationPath, "public"), {
         withFileTypes: true,

@@ -95,6 +95,7 @@ export interface GalleryRenderer {
 export interface BuildGalleryOptions {
   readonly repositoryRoot: string;
   readonly generationPath: string;
+  readonly outputPath?: string;
   readonly leaderboard?: Leaderboard;
   readonly renderer?: GalleryRenderer;
 }
@@ -194,9 +195,12 @@ async function copyFonts(sourceRoot: string, destinationRoot: string): Promise<v
   for (const entry of entries.sort((left, right) =>
     left.name.localeCompare(right.name),
   )) {
-    if (!entry.name.toLowerCase().endsWith(".ttf")) continue;
+    const lowerName = entry.name.toLowerCase();
+    if (!lowerName.endsWith(".ttf") && !/^ofl-[a-z0-9.-]+\.txt$/u.test(lowerName)) {
+      continue;
+    }
     const sourcePath = join(sourceRoot, entry.name);
-    await assertRegularFile(sourcePath, `challenge font ${entry.name}`);
+    await assertRegularFile(sourcePath, `challenge font asset ${entry.name}`);
     await copyFile(sourcePath, join(destinationRoot, entry.name));
   }
 }
@@ -769,14 +773,15 @@ export async function buildGallery(
   );
   const stylesheet = await chooseStylesheet(generationPath, leaderboard);
   const fallbackBytes = await readFile(join(challengeRoot, "fallback.css"));
-  const publicPath = join(generationPath, "public");
+  const publicPath = resolve(options.outputPath ?? join(generationPath, "public"));
   const temporaryPath = join(
-    generationPath,
+    dirname(publicPath),
     `.${basename(publicPath)}.build-${randomBytes(8).toString("hex")}`,
   );
   const screenshotPaths: string[] = [];
   const fullDesignPaths: Array<string | null> = [];
   try {
+    await mkdir(dirname(publicPath), { recursive: true });
     await mkdir(join(temporaryPath, "screenshots"), { recursive: true });
     await copyFonts(
       join(generationPath, "challenge/fonts"),

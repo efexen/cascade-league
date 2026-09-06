@@ -132,8 +132,8 @@ or executable paths. The grant is not persisted: a `resume-generation` that
 still has pending command tasks must pass `--allow-model-calls` again, while a
 resume whose command tasks are all terminal (for example, finishing scoring and
 the gallery) proceeds without it. `create-generation`, `verify`,
-`plan-generation`, `build-gallery`, `serve-gallery`, and `summarize-generation`
-never require it and never make a model call themselves, and
+`plan-generation`, `build-gallery`, `export-static`, `serve-gallery`, and
+`summarize-generation` never require it and never make a model call themselves, and
 `fixture-tournament` is fixture-only.
 
 A command contestant whose `execution.oneShotEnforcement` is `prompt_only` is
@@ -169,6 +169,7 @@ pnpm garden run-generation --season 001 --profile fixture --generations-root /tm
 pnpm garden run-generation --generation 0001 --generations-root /tmp/cascade-league-runs
 pnpm garden resume-generation --generation 0001 --generations-root /tmp/cascade-league-runs
 pnpm garden build-gallery --generation 0001 --generations-root /tmp/cascade-league-runs
+pnpm garden export-static --generation-path /tmp/cascade-league-runs/0001 --site-path ../cascade-league-seasons
 pnpm garden serve-gallery --generation 0001 --generations-root /tmp/cascade-league-runs
 pnpm garden summarize-generation --generation 0001 --generations-root /tmp/cascade-league-runs
 pnpm garden summarize-generation --generation-path /tmp/cascade-league-runs/0001
@@ -195,6 +196,28 @@ output: it may rebuild only derived `public/` bytes from a completed/scored
 generation. `summarize-generation` is the corresponding private exception: it
 may rebuild only the derived `run-summary.json`. The local server binds to
 loopback; stop it with Ctrl-C.
+
+## Static publication export
+
+`export-static` rebuilds one terminally completed generation into a separate
+content-only static-site checkout. It writes the generation atomically beneath
+`seasons/<season-id>/<generation-id>/`, then deterministically regenerates the
+site's `catalog.json`, root `index.html`, and `.nojekyll` file:
+
+```sh
+pnpm garden export-static \
+  --generation-path /absolute/path/to/completed-generation \
+  --site-path /absolute/path/to/cascade-league-seasons
+```
+
+The exporter reuses the gallery integrity and public-content checks. It rebuilds
+functional candidate pages from the archived challenge document and each
+candidate's validated, sanitised stylesheet; copies only required screenshots,
+fonts, and thumbnails; and never copies private generation artifacts such as
+prompts, run plans, judgments, command logs, raw submissions, or configuration.
+The publication checkout and immutable source generation must be separate paths,
+and symlinks in the publication catalog are rejected. The command does not run
+models, initialize Git, commit, push, or configure a hosting provider.
 
 ## Run summary (`run-summary.json`)
 

@@ -10,6 +10,7 @@ import { listCheckedInProfiles } from "../config/profiles.js";
 import { buildGallery } from "../gallery/index.js";
 import { runGeneration } from "../orchestration/generation.js";
 import { runWaveB } from "../orchestration/wave-b.js";
+import { exportGenerationToStaticSite } from "../publishing/static-site.js";
 import { startLoopbackStaticServer } from "../rendering/index.js";
 import { summarizeGeneration } from "../summarize/index.js";
 import { formatRunPlan, planGeneration } from "./planning.js";
@@ -280,6 +281,24 @@ program
     });
     console.log(`gallery: ${result.publicPath}`);
   });
+
+program
+  .command("export-static")
+  .description("Export a completed generation into a static publication checkout")
+  .option("--generation <generation>", "existing four-digit generation ID")
+  .option("--generation-path <path>", "existing generation directory")
+  .option("--generations-root <path>", "root directory for an existing generation")
+  .requiredOption("--site-path <path>", "local checkout of the static publication repo")
+  .action(
+    async (options: GenerationLocationOptions & { readonly sitePath: string }) => {
+      const result = await exportGenerationToStaticSite({
+        repositoryRoot: process.cwd(),
+        generationPath: existingGenerationPath(options),
+        siteRoot: resolve(options.sitePath),
+      });
+      console.log(`[${result.generationId}] static publication: ${result.publicPath}`);
+    },
+  );
 
 program
   .command("summarize-generation")
