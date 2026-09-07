@@ -1,9 +1,14 @@
-import { lstat, mkdir, readdir } from "node:fs/promises";
+import { lstat, mkdir, readdir, realpath } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 
 import { writeTextAtomically } from "../contestants/support.js";
 import { buildGallery, PublicMetadataSchema } from "../gallery/builder.js";
-import { ManifestSchema, readJsonWithSchema } from "../schemas/index.js";
+import {
+  ManifestSchema,
+  StaticSiteCatalogSchema,
+  readJsonWithSchema,
+  type StaticSiteCatalogGeneration,
+} from "../schemas/index.js";
 
 export interface ExportGenerationToStaticSiteOptions {
   readonly repositoryRoot: string;
@@ -17,20 +22,67 @@ export interface ExportedStaticGeneration {
   readonly publicPath: string;
 }
 
-interface CatalogGeneration {
-  readonly seasonId: string;
-  readonly generationId: string;
-  readonly path: string;
-}
-
 function isNestedPath(parent: string, candidate: string): boolean {
   const value = relative(parent, candidate);
   return value === "" || (!value.startsWith(`..${sep}`) && value !== "..");
 }
 
-async function buildCatalog(siteRoot: string): Promise<readonly CatalogGeneration[]> {
+const ALLOWED_PUBLICATION_PATHS = [
+  /^(?:\.nojekyll|CNAME|README\.md|catalog\.json|index\.html)$/u,
+  /^seasons$/u,
+  /^seasons\/\d{4}$/u,
+  /^seasons\/\d{4}\/\d{4}$/u,
+  /^seasons\/\d{4}\/\d{4}\/(?:champion\.css|gallery-layout\.css|gallery-screenshot\.png|gallery-viewport\.png|index\.html|metadata\.json)$/u,
+  /^seasons\/\d{4}\/\d{4}\/screenshots$/u,
+  /^seasons\/\d{4}\/\d{4}\/screenshots\/entry-\d{3}(?:-full)?\.png$/u,
+  /^seasons\/\d{4}\/\d{4}\/fonts$/u,
+  /^seasons\/\d{4}\/\d{4}\/fonts\/(?:[a-z0-9.-]+\.ttf|OFL-[a-z0-9.-]+\.txt)$/iu,
+  /^seasons\/\d{4}\/\d{4}\/designs$/u,
+  /^seasons\/\d{4}\/\d{4}\/designs\/[a-z0-9]+(?:-[a-z0-9]+)*$/u,
+  /^seasons\/\d{4}\/\d{4}\/designs\/[a-z0-9]+(?:-[a-z0-9]+)*\/(?:index\.html|submission\.css)$/u,
+  /^seasons\/\d{4}\/\d{4}\/designs\/[a-z0-9]+(?:-[a-z0-9]+)*\/(?:fonts|thumbnails)$/u,
+  /^seasons\/\d{4}\/\d{4}\/designs\/[a-z0-9]+(?:-[a-z0-9]+)*\/fonts\/(?:[a-z0-9.-]+\.ttf|OFL-[a-z0-9.-]+\.txt)$/iu,
+  /^seasons\/\d{4}\/\d{4}\/designs\/[a-z0-9]+(?:-[a-z0-9]+)*\/thumbnails\/[a-z0-9]+(?:-[a-z0-9]+)*\.png$/u,
+] as const;
+
+async function auditPublicationTree(siteRoot: string): Promise<void> {
+  async function visit(root: string, prefix = ""): Promise<void> {
+    const entries = await readdir(root, { withFileTypes: true });
+    for (const entry of entries) {
+      const relativePath = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+      if (relativePath === ".git") continue;
+      if (!ALLOWED_PUBLICATION_PATHS.some((pattern) => pattern.test(relativePath))) {
+        throw new Error(`unexpected publication path: ${relativePath}`);
+      }
+      const absolutePath = join(root, entry.name);
+      const status = await lstat(absolutePath);
+      if (status.isSymbolicLink()) {
+        throw new Error(`publication path must not be a symlink: ${relativePath}`);
+      }
+      if (entry.isDirectory()) {
+        await visit(absolutePath, relativePath);
+      } else if (!entry.isFile() || status.nlink !== 1) {
+        throw new Error(
+          `publication path must be a regular unlinked file: ${relativePath}`,
+        );
+      }
+    }
+  }
+  await visit(siteRoot);
+}
+
+async function canonicalDirectory(path: string, description: string): Promise<string> {
+  const status = await lstat(path);
+  if (status.isSymbolicLink()) throw new Error(`${description} must not be a symlink`);
+  if (!status.isDirectory()) throw new Error(`${description} must be a directory`);
+  return realpath(path);
+}
+
+async function buildCatalog(
+  siteRoot: string,
+): Promise<readonly StaticSiteCatalogGeneration[]> {
   const seasonsRoot = join(siteRoot, "seasons");
-  const generations: CatalogGeneration[] = [];
+  const generations: StaticSiteCatalogGeneration[] = [];
   const seasons = await readdir(seasonsRoot, { withFileTypes: true });
   for (const season of seasons.sort((left, right) =>
     left.name.localeCompare(right.name),
@@ -72,7 +124,7 @@ async function buildCatalog(siteRoot: string): Promise<readonly CatalogGeneratio
   return generations;
 }
 
-function renderSiteIndex(generations: readonly CatalogGeneration[]): string {
+function renderSiteIndex(generations: readonly StaticSiteCatalogGeneration[]): string {
   const items = generations
     .map(
       (entry) =>
@@ -85,6 +137,7 @@ function renderSiteIndex(generations: readonly CatalogGeneration[]): string {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'">
+    <meta name="referrer" content="no-referrer">
     <title>Cascade League seasons</title>
     <style>body{max-width:54rem;margin:0 auto;padding:3rem 1.25rem;background:#11120f;color:#f1f2e9;font:1rem/1.5 system-ui,sans-serif}h1{font-size:clamp(2.5rem,8vw,5rem);line-height:.95}a{color:#dfff39}li{margin:.75rem 0}</style>
   </head>
@@ -121,8 +174,20 @@ export async function exportGenerationToStaticSite(
   }
 
   await mkdir(siteRoot, { recursive: true });
+  const canonicalGenerationPath = await canonicalDirectory(
+    generationPath,
+    "immutable generation root",
+  );
+  const canonicalSiteRoot = await canonicalDirectory(siteRoot, "publication root");
+  if (
+    isNestedPath(canonicalGenerationPath, canonicalSiteRoot) ||
+    isNestedPath(canonicalSiteRoot, canonicalGenerationPath)
+  ) {
+    throw new Error("publication site and immutable generation paths must be separate");
+  }
+  await auditPublicationTree(canonicalSiteRoot);
   const publicPath = join(
-    siteRoot,
+    canonicalSiteRoot,
     "seasons",
     manifest.seasonId,
     manifest.generationId,
@@ -132,13 +197,18 @@ export async function exportGenerationToStaticSite(
     generationPath,
     outputPath: publicPath,
   });
-  const generations = await buildCatalog(siteRoot);
+  await auditPublicationTree(canonicalSiteRoot);
+  const generations = await buildCatalog(canonicalSiteRoot);
+  const catalog = StaticSiteCatalogSchema.parse({ schemaVersion: 1, generations });
   await writeTextAtomically(
-    join(siteRoot, "catalog.json"),
-    `${JSON.stringify({ schemaVersion: 1, generations }, null, 2)}\n`,
+    join(canonicalSiteRoot, "catalog.json"),
+    `${JSON.stringify(catalog, null, 2)}\n`,
   );
-  await writeTextAtomically(join(siteRoot, "index.html"), renderSiteIndex(generations));
-  await writeTextAtomically(join(siteRoot, ".nojekyll"), "");
+  await writeTextAtomically(
+    join(canonicalSiteRoot, "index.html"),
+    renderSiteIndex(generations),
+  );
+  await writeTextAtomically(join(canonicalSiteRoot, ".nojekyll"), "");
   return {
     seasonId: manifest.seasonId,
     generationId: manifest.generationId,

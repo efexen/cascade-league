@@ -192,4 +192,69 @@ describe("static publication export", () => {
       }),
     ).rejects.toThrow(/symlink/iu);
   }, 30000);
+
+  it("rejects a symlinked publication root without changing its target", async () => {
+    const generationsRoot = await createTestTempRoot("cascade-publish-root-link-");
+    const siteTarget = await createTestTempRoot("cascade-publish-root-target-");
+    const linkParent = await createTestTempRoot("cascade-publish-root-parent-");
+    const siteRoot = join(linkParent, "site");
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      profileId: "fixture",
+      generationId: "0001",
+      now: timestamp,
+    });
+    await runGeneration({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      generatedAt: timestamp,
+    });
+    await symlink(siteTarget, siteRoot);
+    const before = await hashTree(siteTarget);
+
+    await expect(
+      exportGenerationToStaticSite({
+        repositoryRoot,
+        generationPath: generation.generationPath,
+        siteRoot,
+      }),
+    ).rejects.toThrow(/publication root.*symlink/iu);
+    expect(await hashTree(siteTarget)).toBe(before);
+  }, 30000);
+
+  it("rejects unexpected publication paths without changing the checkout", async () => {
+    const generationsRoot = await createTestTempRoot("cascade-publish-allowlist-");
+    const siteRoot = await createTestTempRoot("cascade-publish-allowlist-site-");
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      profileId: "fixture",
+      generationId: "0001",
+      now: timestamp,
+    });
+    await runGeneration({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      generatedAt: timestamp,
+    });
+    await exportGenerationToStaticSite({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      siteRoot,
+    });
+    await writeFile(join(siteRoot, "private.log"), "publication sentinel\n", "utf8");
+    const before = await hashTree(siteRoot);
+
+    await expect(
+      exportGenerationToStaticSite({
+        repositoryRoot,
+        generationPath: generation.generationPath,
+        siteRoot,
+      }),
+    ).rejects.toThrow(/unexpected publication path/iu);
+    expect(await hashTree(siteRoot)).toBe(before);
+  }, 30000);
 });
