@@ -1,6 +1,13 @@
 # OpenCode CLI integration
 
-Tested with OpenCode CLI `1.18.25`.
+Tested with OpenCode CLI `1.18.25`. Resolve the executable with
+`command -v opencode` and record the exact `opencode --version` output. The
+`/opt/homebrew/bin/opencode` path below is only a common Apple Silicon Homebrew
+location.
+
+Use a `provider/model` identifier available to your own authenticated account.
+The value `provider/model` below is a placeholder, not a known or recommended
+model ID. Cascade League does not validate entitlement during preflight.
 
 The generic command adapter invokes these wrappers with argv arrays and
 `/usr/bin/env node --import <repo>/node_modules/tsx/dist/loader.mjs`:

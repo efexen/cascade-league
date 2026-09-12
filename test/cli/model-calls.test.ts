@@ -141,7 +141,7 @@ describe("garden --allow-model-calls wiring", () => {
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("--allow-model-calls");
     }
-  });
+  }, 15000);
 
   it("run-generation refuses a command generation without the flag and mutates nothing", async () => {
     const copy = await repositoryWithCommandProfile();

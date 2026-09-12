@@ -421,10 +421,14 @@ async function writeJsonAtomically<T>(
   path: string,
   schema: z.ZodType<T>,
   value: T,
+  options: { readonly mode?: number } = {},
 ): Promise<void> {
   const validated = schema.parse(value);
   const temporaryPath = `${path}.${secureRandomBytes(8).toString("hex")}.tmp`;
-  await writeFile(temporaryPath, `${JSON.stringify(validated, null, 2)}\n`, "utf8");
+  await writeFile(temporaryPath, `${JSON.stringify(validated, null, 2)}\n`, {
+    encoding: "utf8",
+    ...(options.mode === undefined ? {} : { mode: options.mode }),
+  });
   await rename(temporaryPath, path);
 }
 
@@ -448,12 +452,12 @@ async function makeWritable(directory: string): Promise<void> {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
       await makeWritable(path);
-      await chmod(path, 0o755);
+      await chmod(path, 0o700);
     } else if (entry.isFile()) {
-      await chmod(path, 0o644);
+      await chmod(path, 0o600);
     }
   }
-  await chmod(directory, 0o755);
+  await chmod(directory, 0o700);
 }
 
 async function makeContentsReadOnly(directory: string): Promise<void> {
@@ -831,7 +835,7 @@ export async function createGeneration(
   }
 
   try {
-    await mkdir(temporaryGenerationPath, { recursive: true });
+    await mkdir(temporaryGenerationPath, { recursive: true, mode: 0o700 });
     await mkdir(join(temporaryGenerationPath, "config"), { recursive: true });
     await mkdir(join(temporaryGenerationPath, "challenge"), { recursive: true });
     await mkdir(join(temporaryGenerationPath, "contestants"), { recursive: true });
@@ -963,6 +967,7 @@ export async function createGeneration(
     });
     const snapshot = {
       schemaVersion: 1 as const,
+      publicationSourceNonce: secureRandomBytes(32).toString("hex"),
       sourceTemplate: repositoryRelativePath(
         repositoryRoot,
         join(seasonRoot, definition.config.template),
@@ -1020,6 +1025,7 @@ export async function createGeneration(
         generationId,
         entries: anonymousEntries,
       },
+      { mode: 0o600 },
     );
 
     const manifest = {

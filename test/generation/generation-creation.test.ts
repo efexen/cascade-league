@@ -292,6 +292,14 @@ describe("immutable generation creation", () => {
         await readFile(join(result.generationPath, "challenge/snapshot.json"), "utf8"),
       ) as unknown,
     );
+    expect(snapshot).toHaveProperty(
+      "publicationSourceNonce",
+      expect.stringMatching(/^[a-f0-9]{64}$/u),
+    );
+    expect(
+      (await stat(join(result.generationPath, "judging/anonymous-map.json"))).mode &
+        0o077,
+    ).toBe(0);
     expect(snapshot.inputHashes["config/profile.json"]).toBe(
       await sha256(profileJsonPath),
     );
@@ -473,7 +481,7 @@ describe("immutable generation creation", () => {
 
     expect(manifest.status).toBe("created");
     expect(manifest.createdAt).toBe(timestamp);
-    expect(manifest.environment.playwrightVersion).toBe("1.55.0");
+    expect(manifest.environment.playwrightVersion).toBe("1.63.0");
     expect(manifest.environment.chromiumVersion).toMatch(/^\d+\.\d+\.\d+\.\d+$/);
     expect(manifest.contestantIds).toHaveLength(3);
     expect(
@@ -491,6 +499,10 @@ describe("immutable generation creation", () => {
     expect(
       (await stat(join(generationPath, "challenge/challenge.html"))).mode & 0o222,
     ).toBe(0);
+    expect(
+      (await stat(join(generationPath, "judging/anonymous-map.json"))).mode & 0o077,
+    ).toBe(0);
+    expect((await stat(generationPath)).mode & 0o077).toBe(0);
 
     const canonicalFiles = await filesUnder(join(generationPath, "challenge"), "");
     const canonicalHashes = new Map(

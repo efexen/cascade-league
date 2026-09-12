@@ -1,7 +1,8 @@
 # Codex CLI integration
 
-This is a thin argv/file bridge for Codex CLI `0.150.1`, tested on this host
-with `/opt/homebrew/bin/codex --version` returning `codex-cli 0.150.1`. The
+This is a thin argv/file bridge whose CLI surface was checked with Codex CLI
+`0.154.0` (`codex --version` returned `codex-cli 0.154.0`). `/opt/homebrew/bin/codex` below
+is a common Apple Silicon Homebrew path, not a required location. The
 generic command adapters still own timeouts, logs, environment allowlists, and
 the one-attempt boundary. The wrapper makes one `codex exec` call and does not
 retry.
@@ -9,7 +10,8 @@ retry.
 The checked-in profiles intentionally do not include this integration or a
 `real.local` roster. Copy these argv arrays into the operator's ignored
 `config/profiles/real.local/` files, replacing the uppercase placeholders with
-literal values. The wrapper entrypoints are TypeScript, so the pinned local
+literal values from your own installation and entitled account. `MODEL_ID` is
+not a known or recommended model identifier; do not use it literally. The wrapper entrypoints are TypeScript, so the pinned local
 `tsx` loader is used while `/usr/bin/env` resolves `node` through the allowlisted
 `PATH`.
 
@@ -25,7 +27,7 @@ argv:
   - --codex-path
   - /opt/homebrew/bin/codex
   - --codex-version
-  - 0.150.1
+  - 0.154.0
   - --model
   - MODEL_ID
   - --reasoning-effort
@@ -59,7 +61,7 @@ argv:
   - --codex-path
   - /opt/homebrew/bin/codex
   - --codex-version
-  - 0.150.1
+  - 0.154.0
   - --model
   - MODEL_ID
   - --reasoning-effort
@@ -97,7 +99,8 @@ JSON-only `--output-last-message` result to the requested adapter output. Core
 schemas remain the final validation authority.
 
 OAuth is expected to come from the user's Codex home, not an API key. The
-normal profile can allowlist `HOME` and `PATH`; `CODEX_API_KEY` is neither
+normal profile can allowlist `HOME` and `PATH` (plus `CODEX_HOME` when that is
+where the authenticated configuration lives); `CODEX_API_KEY` is neither
 required nor passed to the Codex child. Usage is left unknown because this
 wrapper does not rely on an unstable Codex usage-event format. Before a model
 call, the wrapper runs `codex --version` and refuses a mismatch with the pinned

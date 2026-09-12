@@ -79,6 +79,10 @@ export const PublicMetadataSchema = z
     seasonId: z.string().regex(/^\d{4}$/u),
     generationId: z.string().regex(/^\d{4}$/u),
     generatedAt: z.string().datetime({ offset: false }).endsWith("Z"),
+    sourceGenerationIdentity: z
+      .string()
+      .regex(/^sha256:[a-f0-9]{64}$/u)
+      .optional(),
     stylesheetKind: z.enum(["champion", "fallback"]),
     championContestantId: z.string().min(1).nullable(),
     championDisplayName: z.string().min(1).nullable(),
@@ -87,6 +91,32 @@ export const PublicMetadataSchema = z
     entries: z.array(PublicMetadataEntrySchema),
   })
   .strict();
+
+export function sourceGenerationIdentity(
+  manifestBytes: Uint8Array,
+  publicationSourceNonce: string,
+): string {
+  const manifest = ManifestSchema.parse(
+    JSON.parse(Buffer.from(manifestBytes).toString("utf8")) as unknown,
+  );
+  const stableIdentity = JSON.stringify({
+    schemaVersion: manifest.schemaVersion,
+    seasonId: manifest.seasonId,
+    generationId: manifest.generationId,
+    createdAt: manifest.createdAt,
+    previousGenerationId: manifest.previousGenerationId,
+    challengeVersion: manifest.challengeVersion,
+    configHashes: manifest.configHashes,
+    environment: manifest.environment,
+    contestantIds: manifest.contestantIds,
+    judgeIds: manifest.judgeIds,
+  });
+  return `sha256:${createHash("sha256")
+    .update(stableIdentity)
+    .update("\0")
+    .update(publicationSourceNonce)
+    .digest("hex")}`;
+}
 
 export interface GalleryRenderer {
   render(input: StaticPageRenderInput): Promise<StaticPageRenderResult>;
@@ -726,9 +756,11 @@ export async function buildGallery(
   // gallery builds deliberately never read source bytes from it.
   void options.repositoryRoot;
   const generationPath = resolve(options.generationPath);
-  const manifest = await readJsonWithSchema(
-    join(generationPath, "manifest.json"),
-    ManifestSchema,
+  const manifestPath = join(generationPath, "manifest.json");
+  const manifestBytes = await readFile(manifestPath);
+
+  const manifest = ManifestSchema.parse(
+    JSON.parse(manifestBytes.toString("utf8")) as unknown,
   );
   if (
     manifest.status !== "scored" &&
@@ -751,10 +783,8 @@ export async function buildGallery(
     throw new Error("leaderboard does not match the generation manifest");
   }
   await verifyLeaderboardArtifacts(generationPath, manifest, leaderboard);
-  const { archive, challengeConfig, judgesConfig } = await verifyGenerationSources(
-    generationPath,
-    manifest,
-  );
+  const { snapshot, archive, challengeConfig, judgesConfig } =
+    await verifyGenerationSources(generationPath, manifest);
   const presentation = await loadGalleryPresentation({
     generationPath,
     manifest,
@@ -904,6 +934,10 @@ export async function buildGallery(
           seasonId: manifest.seasonId,
           generationId: manifest.generationId,
           generatedAt: leaderboard.generatedAt,
+          sourceGenerationIdentity: sourceGenerationIdentity(
+            manifestBytes,
+            snapshot.publicationSourceNonce,
+          ),
           stylesheetKind: selectedStylesheet.kind,
           championContestantId: selectedStylesheet.champion?.contestantId ?? null,
           championDisplayName: selectedStylesheet.champion?.displayName ?? null,

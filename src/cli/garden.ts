@@ -289,13 +289,28 @@ program
   .option("--generation-path <path>", "existing generation directory")
   .option("--generations-root <path>", "root directory for an existing generation")
   .requiredOption("--site-path <path>", "local checkout of the static publication repo")
+  .option(
+    "--replace-existing",
+    "replace an occupied season/generation published from a different source",
+  )
   .action(
-    async (options: GenerationLocationOptions & { readonly sitePath: string }) => {
+    async (
+      options: GenerationLocationOptions & {
+        readonly sitePath: string;
+        readonly replaceExisting?: boolean;
+      },
+    ) => {
       const result = await exportGenerationToStaticSite({
         repositoryRoot: process.cwd(),
         generationPath: existingGenerationPath(options),
         siteRoot: resolve(options.sitePath),
+        replaceExisting: options.replaceExisting === true,
       });
+      if (result.replacedSourceIdentity !== undefined) {
+        console.log(
+          `[${result.generationId}] replaced static source ${result.replacedSourceIdentity} with ${result.sourceIdentity}`,
+        );
+      }
       console.log(`[${result.generationId}] static publication: ${result.publicPath}`);
     },
   );

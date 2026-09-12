@@ -108,6 +108,7 @@ export const SnapshotDataSourceSchema = z.discriminatedUnion("kind", [
 
 export const SnapshotSchema = StrictObject({
   schemaVersion: SchemaVersionSchema,
+  publicationSourceNonce: z.string().regex(/^[a-f0-9]{64}$/u),
   sourceTemplate: RelativePosixPathSchema,
   dataSource: SnapshotDataSourceSchema,
   resolvedHtmlPath: RelativePosixPathSchema,

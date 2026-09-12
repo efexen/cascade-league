@@ -1,10 +1,15 @@
-import { lstat, mkdir, readdir, realpath } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, realpath } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 
 import { writeTextAtomically } from "../contestants/support.js";
-import { buildGallery, PublicMetadataSchema } from "../gallery/builder.js";
+import {
+  buildGallery,
+  PublicMetadataSchema,
+  sourceGenerationIdentity,
+} from "../gallery/builder.js";
 import {
   ManifestSchema,
+  SnapshotSchema,
   StaticSiteCatalogSchema,
   readJsonWithSchema,
   type StaticSiteCatalogGeneration,
@@ -14,12 +19,26 @@ export interface ExportGenerationToStaticSiteOptions {
   readonly repositoryRoot: string;
   readonly generationPath: string;
   readonly siteRoot: string;
+  readonly replaceExisting?: boolean;
 }
 
 export interface ExportedStaticGeneration {
   readonly seasonId: string;
   readonly generationId: string;
   readonly publicPath: string;
+  readonly sourceIdentity: string;
+  readonly replacedSourceIdentity?: string;
+}
+
+async function publicationExists(path: string): Promise<boolean> {
+  try {
+    return (await lstat(path)).isDirectory();
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
 }
 
 function isNestedPath(parent: string, candidate: string): boolean {
@@ -29,6 +48,7 @@ function isNestedPath(parent: string, candidate: string): boolean {
 
 const ALLOWED_PUBLICATION_PATHS = [
   /^(?:\.nojekyll|CNAME|README\.md|catalog\.json|index\.html)$/u,
+  /^(?:LICENSE|NOTICE)(?:\.md|\.txt)?$/u,
   /^seasons$/u,
   /^seasons\/\d{4}$/u,
   /^seasons\/\d{4}\/\d{4}$/u,
@@ -192,6 +212,32 @@ export async function exportGenerationToStaticSite(
     manifest.seasonId,
     manifest.generationId,
   );
+  const newIdentity = sourceGenerationIdentity(
+    await readFile(join(generationPath, "manifest.json")),
+    (
+      await readJsonWithSchema(
+        join(generationPath, "challenge/snapshot.json"),
+        SnapshotSchema,
+      )
+    ).publicationSourceNonce,
+  );
+  let replacedSourceIdentity: string | undefined;
+  if (await publicationExists(publicPath)) {
+    const existingMetadata = await readJsonWithSchema(
+      join(publicPath, "metadata.json"),
+      PublicMetadataSchema,
+    );
+    if (existingMetadata.sourceGenerationIdentity !== newIdentity) {
+      const oldIdentity =
+        existingMetadata.sourceGenerationIdentity ?? "legacy-unidentified";
+      if (options.replaceExisting !== true) {
+        throw new Error(
+          `publication ${manifest.seasonId}/${manifest.generationId} is occupied by source ${oldIdentity}; new source ${newIdentity}; pass --replace-existing to replace it`,
+        );
+      }
+      replacedSourceIdentity = oldIdentity;
+    }
+  }
   await buildGallery({
     repositoryRoot: options.repositoryRoot,
     generationPath,
@@ -213,5 +259,7 @@ export async function exportGenerationToStaticSite(
     seasonId: manifest.seasonId,
     generationId: manifest.generationId,
     publicPath,
+    sourceIdentity: newIdentity,
+    ...(replacedSourceIdentity === undefined ? {} : { replacedSourceIdentity }),
   };
 }

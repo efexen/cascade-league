@@ -40,6 +40,15 @@ describe("garden CLI inputs", () => {
     expect(() => normalizeSeasonId("00001")).toThrow();
   });
 
+  it("exposes explicit replacement consent for static exports", async () => {
+    const result = await execFileAsync(
+      process.execPath,
+      ["node_modules/tsx/dist/cli.mjs", "src/cli/garden.ts", "export-static", "--help"],
+      { cwd: repositoryRoot },
+    );
+    expect(result.stdout).toContain("--replace-existing");
+  });
+
   it("exposes the runnable Wave-B command", async () => {
     const result = await execFileAsync(
       process.execPath,
@@ -74,7 +83,7 @@ describe("garden CLI profile requirement", () => {
       expect(result.stderr).toContain(`--profile is required for ${command}`);
       expect(result.stderr).toContain("checked-in profiles: fixture, real.example");
     }
-  });
+  }, 15000);
 });
 
 describe("garden CLI real.example template profile", () => {

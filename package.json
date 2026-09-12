@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@10.30.3",
   "engines": {
-    "node": ">=22"
+    "node": "22.x || >=24"
   },
   "scripts": {
     "garden": "tsx src/cli/garden.ts",
@@ -31,11 +31,11 @@
     "@types/node": "24.3.0",
     "eslint": "9.35.0",
     "html-validate": "10.4.0",
-    "playwright": "1.55.0",
+    "playwright": "1.63.0",
     "prettier": "3.6.2",
     "tsx": "4.20.5",
     "typescript": "5.9.2",
     "typescript-eslint": "8.42.0",
-    "vitest": "3.2.4"
+    "vitest": "4.1.11"
   }
 }

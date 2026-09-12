@@ -5,12 +5,23 @@ import { stringify as stringifyYaml } from "yaml";
 
 import { resolveProfile, type ResolvedProfile } from "../../src/config/profiles.js";
 import {
+  isSupportedNodeMajor,
   runProfilePreflightChecks,
   runRepositoryPreflight,
 } from "../../src/preflight/index.js";
 import { createTestTempRoot } from "../helpers/temp-roots.js";
 
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
+
+describe("Node runtime support", () => {
+  it("matches the even-major toolchain support range", () => {
+    expect(isSupportedNodeMajor(21)).toBe(false);
+    expect(isSupportedNodeMajor(22)).toBe(true);
+    expect(isSupportedNodeMajor(23)).toBe(false);
+    expect(isSupportedNodeMajor(24)).toBe(true);
+    expect(isSupportedNodeMajor(25)).toBe(true);
+  });
+});
 
 function commandContestant(id: string, overrides: Record<string, unknown> = {}) {
   return {

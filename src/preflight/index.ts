@@ -240,6 +240,14 @@ async function commandExecutables(
 }
 
 /**
+ * Node 24 is the reference runtime. The installed toolchain supports Node 22
+ * and Node 24+, but not Node 23.
+ */
+export function isSupportedNodeMajor(nodeMajor: number): boolean {
+  return nodeMajor === 22 || nodeMajor >= 24;
+}
+
+/**
  * The complete no-model-call preflight shared by `garden verify` and
  * `garden plan-generation`. It never executes a configured command and never
  * makes a model call.
@@ -253,15 +261,18 @@ export async function runRepositoryPreflight(
   const root = join(repositoryRoot);
   const environment = options.environment ?? process.env;
   const nodeMajor = Number.parseInt(process.versions.node.split(".")[0] ?? "0", 10);
-  if (nodeMajor < 22) {
+  if (!isSupportedNodeMajor(nodeMajor)) {
     issues.push(
-      issue("node_version", `Node 22 or newer is required; running ${process.version}`),
+      issue(
+        "node_version",
+        `Node 22.x or Node 24 and newer is required; running ${process.version}`,
+      ),
     );
   } else if (nodeMajor !== 24) {
     issues.push(
       issue(
         "node_version",
-        `Node 24.x is the reference runtime; compatible Node.js >=22 is supported (running ${process.version})`,
+        `Node 24.x is the reference runtime; Node.js 22.x and 24 or newer are supported (running ${process.version})`,
         "warning",
       ),
     );

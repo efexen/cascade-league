@@ -103,6 +103,7 @@ describe("artifact schemas", () => {
     expect(
       SnapshotSchema.parse({
         schemaVersion: 1,
+        publicationSourceNonce: "a".repeat(64),
         sourceTemplate: "challenge/season-001/challenge.hbs",
         dataSource: {
           kind: "seed",
@@ -455,6 +456,7 @@ describe("artifact schemas", () => {
     expect(() =>
       SnapshotSchema.parse({
         schemaVersion: 1,
+        publicationSourceNonce: "a".repeat(64),
         sourceTemplate: "challenge/season-001/challenge.hbs",
         dataSource: {
           kind: "seed",
