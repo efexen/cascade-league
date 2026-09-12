@@ -117,8 +117,8 @@ agent sandboxing, or the full per-contestant evolution briefing described in the
 planning packet. Current checked-in challenges use a `1280 × 1200` judging viewport;
 archived configurations may use `1440 × 1200`.
 
-**Licensing is unresolved:** this checkout has no project-level LICENSE file.
-Do not assume an open-source licence or redistribution permission from visibility
-alone. Bundled fonts carry separate licence notices; see each season's
-`fonts/README.md` and licence files. A maintainer must resolve project and asset
-rights before an open-source release.
+The project source is available under the [MIT License](LICENSE). Bundled fonts
+carry separate OFL notices; see each season's `fonts/README.md` and licence files.
+Seed and reference-image provenance is recorded separately from the software
+licence in [`assets/first-party-images.json`](assets/first-party-images.json).
+That manifest records the maintainer attestation and SHA-256 hash of every image.

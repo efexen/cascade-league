@@ -19,4 +19,4 @@ pnpm verify
 
 Keep credentials, `config/profiles/real.local/`, real model output, and generated generations out of commits. Do not weaken argv-array execution, environment allowlists, anonymous judging, immutable artifacts, one-attempt behavior, model-call consent, output escaping, or publication filtering.
 
-No project-level `LICENSE` file exists in this checkout. Do not describe the project as carrying an open-source licence or assume redistribution rights until maintainers add one explicitly.
+Contributions are accepted under the project's [MIT License](LICENSE). Preserve the separate notices for bundled fonts and other third-party assets.

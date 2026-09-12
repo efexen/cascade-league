@@ -2,10 +2,10 @@
 
 Use this checklist before describing a checkout as ready for public onboarding. It is not a publishing command.
 
-- [ ] A project-level licence has been selected and a `LICENSE` file added. Until then, do not claim an open-source licence or redistribution rights.
-- [ ] Bundled font and seed-asset notices have been reviewed for the intended distribution.
-- [ ] Publication of the existing Git author/committer identity has been explicitly approved, or an authorized history rewrite has been completed and the rewritten history rescanned.
-- [ ] Tracked provider/model identities in planning documents, tests, and operator docs have been reviewed and approved as intentional public disclosures.
+- [x] The MIT project licence has been added at `LICENSE` and declared in `package.json`.
+- [x] Bundled fonts retain their OFL notices; first-party seed/reference images are attested and hashed in `assets/first-party-images.json` under MIT.
+- [x] The maintainer approved publication of the existing Git author/committer identity; no history rewrite is required.
+- [x] The maintainer approved tracked provider/model identities as intentional disclosures central to the experiment.
 - [ ] README clone URL, Node/pnpm/Playwright versions, profile paths, CLI flags, and integration versions match the release commit.
 - [ ] `pnpm garden --help` and each documented subcommand help have been compared with operator docs.
 - [ ] `pnpm garden verify --profile fixture` passes on the release macOS environment.
