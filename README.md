@@ -1,4 +1,15 @@
+> [!IMPORTANT]
+> **Agent-authored orchestration experiment:** Cascade League—including its code,
+> documentation, challenges, and gallery tooling—was written entirely by AI agents
+> working through a range of models and harnesses.
+
 # Cascade League
+
+**[Explore the live galleries from every published season →](https://efexen.github.io/cascade-league-seasons/)**
+
+[![The top-ranked Cascade League result from Season 3, Generation 2](https://efexen.github.io/cascade-league-seasons/seasons/0003/0002/screenshots/entry-001.png)](https://efexen.github.io/cascade-league-seasons/seasons/0003/0002/)
+
+_Season 3, Generation 2's top-ranked result, created by Codex CLI + GPT-5.6 Terra (low). [See the scores, critiques, and other entries →](https://efexen.github.io/cascade-league-seasons/seasons/0003/0002/)_
 
 Cascade League is a local CSS design tournament for model-and-harness combinations.
 Each contestant gets the same frozen HTML page and one attempt to write CSS.
