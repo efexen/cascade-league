@@ -434,6 +434,23 @@ export const JudgmentScoresSchema = StrictObject({
   constraintAndCssCraft: ScoreSchema(10),
 });
 
+export const MAX_JUDGMENT_TEXT_CHARACTERS = 500;
+
+const UnboundedText = z
+  .string()
+  .min(1)
+  .refine((value) => value.trim().length > 0, "must not be blank");
+
+function requireCritiqueSentenceCount(value: string, context: z.RefinementCtx): void {
+  const count = sentenceCount(value);
+  if (count < 2 || count > 4) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "critique must contain two to four sentences",
+    });
+  }
+}
+
 export const JudgeSummarySchema = StrictObject({
   schemaVersion: SchemaVersionSchema,
   generationId: GenerationIdSchema,
@@ -443,7 +460,7 @@ export const JudgeSummarySchema = StrictObject({
       anonymousCandidateId: AnonymousCandidateIdSchema,
       totalScore: ScoreSchema(100),
       originalityScore: ScoreSchema(20),
-      critique: Text(500),
+      critique: Text(MAX_JUDGMENT_TEXT_CHARACTERS),
     }),
   ),
 });
@@ -455,18 +472,12 @@ const CandidateJudgmentResponseShape = {
   anonymousCandidateId: AnonymousCandidateIdSchema,
   scores: JudgmentScoresSchema,
   totalScore: z.number().int().min(0).max(100),
-  critique: Text(500).superRefine((value, context) => {
-    const count = sentenceCount(value);
-    if (count < 2 || count > 4) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "critique must contain two to four sentences",
-      });
-    }
-  }),
-  strongestQuality: Text(500),
-  primaryWeakness: Text(500),
-  nextMove: Text(500),
+  critique: Text(MAX_JUDGMENT_TEXT_CHARACTERS).superRefine(
+    requireCritiqueSentenceCount,
+  ),
+  strongestQuality: Text(MAX_JUDGMENT_TEXT_CHARACTERS),
+  primaryWeakness: Text(MAX_JUDGMENT_TEXT_CHARACTERS),
+  nextMove: Text(MAX_JUDGMENT_TEXT_CHARACTERS),
   confidence: z.enum(["low", "medium", "high"]),
   flags: z.array(SlugLikeCodeSchema()),
 };
@@ -493,6 +504,16 @@ function withCalculatedJudgmentTotal<T extends z.ZodRawShape>(schema: z.ZodObjec
 
 export const JudgeCandidateResponseSchema = withCalculatedJudgmentTotal(
   StrictObject(CandidateJudgmentResponseShape),
+);
+
+export const JudgeCandidateResponseBeforeTextLimitSchema = withCalculatedJudgmentTotal(
+  StrictObject({
+    ...CandidateJudgmentResponseShape,
+    critique: UnboundedText.superRefine(requireCritiqueSentenceCount),
+    strongestQuality: UnboundedText,
+    primaryWeakness: UnboundedText,
+    nextMove: UnboundedText,
+  }),
 );
 
 export const CandidateJudgmentSchema = withCalculatedJudgmentTotal(

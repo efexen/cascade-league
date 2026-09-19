@@ -34,7 +34,16 @@ Open the printed URL and stop the server with Ctrl-C.
 - `run-plan.json`: private write-once roster, maximum adapter-call counts, configured timeouts/token declarations, resource lanes, usage-reporting gaps, and one-shot acceptance.
 - `config/` and `challenge/`: copied profile and immutable challenge snapshot used by this run. Existing runs do not read later profile edits. Before execution completes, however, the runner also rechecks the original repository challenge and prompt source files against stored hashes; keep that checkout present and byte-unchanged. Completed gallery rebuilds use the archived generation sources.
 - `contestants/<id>/identity.json`, `run.json`, `validation.json`, `sanitised.css`, `screenshot.png`, and `screenshot-viewport.png`: configured identity, one attempt, validation outcome, judge-safe CSS, full-page render, and fixed-viewport render. Command runs may also have private `usage.json` and `execution-metadata.json`.
-- `judging/`: operator-only anonymous map, judge-specific contact sheets/order, task state, validated judgments/awards, raw invalid output, usage/metadata, and logs.
+- `judging/`: operator-only anonymous map, judge-specific contact sheets/order, task state, validated judgments/awards, raw model output, usage/metadata, and logs.
+
+Command-judge responses keep strict identity, score, total, sentence-count, and shape
+validation. If an otherwise valid response exceeds the 500-character limit only in
+`critique`, `strongestQuality`, `primaryWeakness`, or `nextMove`, the adapter
+truncates that presentation text with an ellipsis, at a word boundary when one is
+available, so the numeric assessment is not discarded. The unmodified raw response remains in the private audit artifacts,
+and the successful task records which fields were normalized. This is deterministic
+normalization, not a retry or a repair of scores or identifiers.
+
 - `leaderboard.json`: public identity projection, rank, score, judge completion, critique, awards, and failures.
 - `run-summary.json`: private derived timing, usage/cost completeness, task counts, observed-version completeness, and resource-group observations.
 - `public/`: shareable static output. It contains gallery HTML/CSS, neutral screenshots, design pages, fonts, metadata, and gallery screenshots—not the private audit files above.

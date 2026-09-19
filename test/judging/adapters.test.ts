@@ -226,6 +226,115 @@ describe("fixture judge adapter", () => {
 });
 
 describe("command judge adapter", () => {
+  it("preserves valid scores when model-authored presentation text exceeds its schema limit", async () => {
+    const root = await createTestTempRoot("local-maxima-command-judge-overlong-");
+    const input = candidateInput(root);
+    const overlongCritique = [
+      `A precise observation about the design system ${"and its hierarchy ".repeat(9)}.`,
+      `The composition remains coherent ${"while the typography stays legible ".repeat(6)}.`,
+      `The next iteration should simplify the lower section ${"without losing its visual identity ".repeat(7)}.`,
+    ].join(" ");
+    const overlongSummary = "A specific visual observation ".repeat(24).trim();
+    const response = {
+      ...CANDIDATE_RESPONSE,
+      critique: overlongCritique,
+      strongestQuality: overlongSummary,
+      primaryWeakness: overlongSummary,
+      nextMove: overlongSummary,
+    };
+    const scriptPath = join(root, "overlong-judge.mjs");
+    await writeFile(
+      scriptPath,
+      `import { writeFileSync } from "node:fs"; writeFileSync(process.argv[2], process.env.RESPONSE);`,
+      "utf8",
+    );
+    const judge = {
+      ...input.judge,
+      harness: {
+        name: "command-judge",
+        adapter: "command" as const,
+        command: {
+          argv: [process.execPath, scriptPath, "{judgmentPath}"],
+          environmentAllowlist: ["RESPONSE"],
+        },
+      },
+    };
+
+    const result = await new CommandJudgeAdapter({
+      environment: { RESPONSE: JSON.stringify(response) },
+    }).scoreCandidate({ ...input, judge });
+
+    expect(result.status).toBe("succeeded");
+    expect(result.response?.scores).toEqual(CANDIDATE_RESPONSE.scores);
+    expect(result.response?.totalScore).toBe(CANDIDATE_RESPONSE.totalScore);
+    for (const field of [
+      "critique",
+      "strongestQuality",
+      "primaryWeakness",
+      "nextMove",
+    ] as const) {
+      expect(result.response?.[field].length).toBeLessThanOrEqual(500);
+      expect(result.response?.[field]).toMatch(/\.\.\.$/u);
+    }
+    expect(result.error).toContain(
+      "normalized overlong text fields: critique, strongestQuality, primaryWeakness, nextMove",
+    );
+    expect(result.rawOutput).toBe(JSON.stringify(response));
+    expect(JSON.parse(await readFile(input.rawOutputPath, "utf8"))).toEqual(response);
+  });
+
+  it.each([
+    {
+      name: "raw critique sentence count",
+      override: {
+        critique: Array.from(
+          { length: 5 },
+          () => `A complete sentence ${"with supporting detail ".repeat(6)}.`,
+        ).join(" "),
+      },
+      error: /two to four sentences/iu,
+    },
+    {
+      name: "raw nonblank text",
+      override: { strongestQuality: " ".repeat(501) },
+      error: /must not be blank/iu,
+    },
+  ])(
+    "does not let text-length normalization rescue invalid $name",
+    async ({ override, error }) => {
+      const root = await createTestTempRoot("local-maxima-command-judge-invalid-text-");
+      const input = candidateInput(root);
+      const response = { ...CANDIDATE_RESPONSE, ...override };
+      const scriptPath = join(root, "invalid-text-judge.mjs");
+      await writeFile(
+        scriptPath,
+        `import { writeFileSync } from "node:fs"; writeFileSync(process.argv[2], process.env.RESPONSE);`,
+        "utf8",
+      );
+      const judge = {
+        ...input.judge,
+        harness: {
+          name: "command-judge",
+          adapter: "command" as const,
+          command: {
+            argv: [process.execPath, scriptPath, "{judgmentPath}"],
+            environmentAllowlist: ["RESPONSE"],
+          },
+        },
+      };
+
+      const result = await new CommandJudgeAdapter({
+        environment: { RESPONSE: JSON.stringify(response) },
+      }).scoreCandidate({ ...input, judge });
+
+      expect(result.status).toBe("invalid");
+      expect(result.response).toBeNull();
+      expect(result.judgment).toBeNull();
+      expect(result.error).toMatch(error);
+      expect(result.rawOutput).toBe(JSON.stringify(response));
+    },
+  );
+
   it("uses complete argv placeholders, shell:false, an environment allowlist, and bounded redacted logs", async () => {
     const root = await createTestTempRoot("local-maxima-command-judge-boundary-");
     const input = candidateInput(root);

@@ -4,7 +4,9 @@ import { join } from "node:path";
 import {
   CandidateJudgmentSchema,
   createGenerationAwardsSchema,
+  JudgeCandidateResponseBeforeTextLimitSchema,
   JudgeCandidateResponseSchema,
+  MAX_JUDGMENT_TEXT_CHARACTERS,
   type CandidateJudgment,
 } from "../schemas/index.js";
 import {
@@ -60,6 +62,42 @@ interface ProcessResult {
   readonly stdout: readonly Buffer[];
   readonly stderr: readonly Buffer[];
   readonly error: string | null;
+}
+
+const NORMALIZABLE_JUDGMENT_TEXT_FIELDS = [
+  "critique",
+  "strongestQuality",
+  "primaryWeakness",
+  "nextMove",
+] as const;
+
+function truncateJudgmentText(value: string): string {
+  if (value.length <= MAX_JUDGMENT_TEXT_CHARACTERS) return value;
+  let prefix = value.slice(0, MAX_JUDGMENT_TEXT_CHARACTERS - 3);
+  if (/[\uD800-\uDBFF]$/u.test(prefix)) prefix = prefix.slice(0, -1);
+  const lastWhitespace = prefix.search(/\s+\S*$/u);
+  const boundedPrefix = lastWhitespace > 0 ? prefix.slice(0, lastWhitespace) : prefix;
+  return `${boundedPrefix.trimEnd()}...`;
+}
+
+function normalizeOverlongJudgmentText(value: unknown): {
+  readonly value: unknown;
+  readonly fields: readonly string[];
+} {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return { value, fields: [] };
+  }
+  const normalized = { ...(value as Record<string, unknown>) };
+  const fields: string[] = [];
+  for (const field of NORMALIZABLE_JUDGMENT_TEXT_FIELDS) {
+    const text = normalized[field];
+    if (typeof text !== "string" || text.length <= MAX_JUDGMENT_TEXT_CHARACTERS) {
+      continue;
+    }
+    normalized[field] = truncateJudgmentText(text);
+    fields.push(field);
+  }
+  return { value: normalized, fields };
 }
 
 function pathsMap(paths: JudgeCommandPaths): ReadonlyMap<string, string> {
@@ -370,11 +408,13 @@ export class CommandJudgeAdapter implements JudgeAdapter {
       };
     }
     try {
-      const response = JudgeCandidateResponseSchema.parse(
+      const rawResponse = JudgeCandidateResponseBeforeTextLimitSchema.parse(
         JSON.parse(rawOutput) as unknown,
       );
-      if (!identityMatches(response, input))
+      if (!identityMatches(rawResponse, input))
         throw new Error("judge response IDs do not match the task");
+      const normalized = normalizeOverlongJudgmentText(rawResponse);
+      const response = JudgeCandidateResponseSchema.parse(normalized.value);
       const judgment: CandidateJudgment = CandidateJudgmentSchema.parse({
         ...response,
         modelUsage: usage,
@@ -385,7 +425,15 @@ export class CommandJudgeAdapter implements JudgeAdapter {
         judgment,
         usage,
         rawOutput,
-        error: appendError(usageResult.error, metadataResult.error),
+        error: appendError(
+          appendError(
+            normalized.fields.length === 0
+              ? null
+              : `normalized overlong text fields: ${normalized.fields.join(", ")}`,
+            usageResult.error,
+          ),
+          metadataResult.error,
+        ),
         timedOut: false,
         attemptCount: 1,
         executionMetadata,
