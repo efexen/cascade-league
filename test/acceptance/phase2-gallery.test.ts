@@ -217,9 +217,16 @@ describe("Phase 2 gallery acceptance", () => {
           : `USD ${run.usage.estimatedCostUsd.toFixed(6)}`;
       expect(publicHtml).toContain(`Runtime</dt><dd>${expectedRuntime}`);
       expect(publicHtml).toContain(`Estimated cost</dt><dd>${expectedCost}`);
-      await expectExactScreenshot(
+      await expect(
+        sharp(
+          join(generation.generationPath, `contestants/${contestantId}/screenshot.png`),
+        ).metadata(),
+      ).resolves.toMatchObject({ format: "png", width: 1280 });
+      const candidateMetadata = await sharp(
         join(generation.generationPath, `contestants/${contestantId}/screenshot.png`),
-      );
+      ).metadata();
+      expect(candidateMetadata.height).toBeGreaterThanOrEqual(1200);
+      expect(candidateMetadata.height).toBeLessThanOrEqual(12000);
       await expect(
         sharp(
           join(

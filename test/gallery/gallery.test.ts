@@ -2,7 +2,6 @@ import { cp, chmod, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { chromium } from "playwright";
 import sharp from "sharp";
 
 import { createGeneration } from "../../src/artifacts/generation.js";
@@ -644,9 +643,9 @@ describe("static public gallery", () => {
     ).rejects.toThrow(/status|judge/i);
   }, 30000);
 
-  it("falls back when champion CSS hides populated gallery content", async () => {
+  it("keeps visually unusual champion CSS in the public gallery", async () => {
     const generationsRoot = await createTestTempRoot(
-      "local-maxima-gallery-visibility-fallback-",
+      "local-maxima-gallery-creative-css-",
     );
     const { generation, result: completed } =
       await createCompletedFixtureGeneration(generationsRoot);
@@ -655,82 +654,43 @@ describe("static public gallery", () => {
     );
     expect(champion).toBeDefined();
     if (champion === undefined) throw new Error("fixture generation has no champion");
+    const creativeCss = `
+      .judge-note, .entry-scores, .entry-awards { display:none !important; }
+      body { width: 3000px; }
+      .leaderboard-grid { clip-path: inset(100%); mask-image: linear-gradient(transparent, transparent); }
+    `;
     await appendChampionCss(
       generation.generationPath,
       champion.contestantId,
-      ".judge-note, .entry-scores, .entry-awards { display:none !important; }",
+      creativeCss,
+    );
+    const submission = await readFile(
+      join(
+        generation.generationPath,
+        "contestants",
+        champion.contestantId,
+        "submission.css",
+      ),
     );
 
-    const result = await buildGallery({
+    const built = await buildGallery({
       repositoryRoot,
       generationPath: generation.generationPath,
     });
 
-    expect(result).toMatchObject({
+    expect(built).toMatchObject({
       championContestantId: champion.contestantId,
-      stylesheetKind: "fallback",
+      stylesheetKind: "champion",
     });
-    expect(await readFile(join(result.publicPath, "champion.css"))).toEqual(
-      await readFile(join(generation.generationPath, "challenge/fallback.css")),
-    );
-    expect(await readFile(join(result.publicPath, "metadata.json"), "utf8")).toContain(
-      "could not safely present required public content",
-    );
-    const html = await readFile(join(result.publicPath, "index.html"), "utf8");
-    expect(html).toContain("Combined");
-    expect(html).toContain("Judge notes");
+    expect(await readFile(join(built.publicPath, "champion.css"))).toEqual(submission);
     expect(
-      (await readdir(generation.generationPath)).filter((name) =>
-        name.startsWith(".public.build-"),
-      ),
-    ).toEqual([]);
+      await sharp(join(built.publicPath, "gallery-screenshot.png")).metadata(),
+    ).toMatchObject({
+      format: "png",
+      width: 1280,
+      height: expect.any(Number),
+    });
   }, 30000);
-
-  it("falls back when champion CSS hides the matrix or operational labels", async () => {
-    const hostileRules = [
-      ".judge-matrix { display: none !important; }",
-      ".judge-matrix-row { opacity: 0 !important; }",
-      ".judge-matrix-cell { visibility: hidden !important; }",
-      ".judge-matrix-combined { position: absolute !important; left: -100000px !important; }",
-      ".judge-matrix-range { visibility: hidden !important; }",
-      ".entry-runtime, .entry-estimated-cost { display: none !important; }",
-      ".judge-notes { width: 0 !important; height: 0 !important; overflow: hidden !important; }",
-      '.judge-matrix-cell[data-status="score"] { padding-top: 100000px !important; }',
-      '.judge-matrix-cell[data-status="score"] { position: relative !important; } .judge-matrix-cell[data-status="score"]::after { content: ""; position: absolute; inset: 0; z-index: 1; background: #111 !important; }',
-    ];
-
-    for (const [index, cssRule] of hostileRules.entries()) {
-      const generationsRoot = await createTestTempRoot(
-        `local-maxima-gallery-new-visibility-${String(index)}-`,
-      );
-      const { generation, result: completed } =
-        await createCompletedFixtureGeneration(generationsRoot);
-      const champion = completed.leaderboard.entries.find(
-        (entry) => entry.rank === 1 && entry.status === "valid",
-      );
-      expect(champion).toBeDefined();
-      if (champion === undefined) throw new Error("fixture generation has no champion");
-      await appendChampionCss(
-        generation.generationPath,
-        champion.contestantId,
-        cssRule,
-      );
-
-      const built = await buildGallery({
-        repositoryRoot,
-        generationPath: generation.generationPath,
-      });
-      expect(built.championContestantId).toBe(champion.contestantId);
-      expect(built.stylesheetKind).toBe("fallback");
-      expect(await readFile(join(built.publicPath, "champion.css"))).toEqual(
-        await readFile(join(generation.generationPath, "challenge/fallback.css")),
-      );
-      const html = await readFile(join(built.publicPath, "index.html"), "utf8");
-      expect(html).toContain('class="judge-matrix"');
-      expect(html).toContain("Runtime");
-      expect(html).toContain("Estimated cost");
-    }
-  }, 120000);
 
   it("keeps champion CSS with a benign thumbnail clip path", async () => {
     const generationsRoot = await createTestTempRoot(
@@ -765,64 +725,6 @@ describe("static public gallery", () => {
       ),
     );
   }, 30000);
-
-  it.each([
-    ["ancestor opacity", ".leaderboard-grid { opacity: 0 !important; }"],
-    [
-      "off-document positioning",
-      ".entry-card { position: absolute !important; left: -100000px !important; }",
-    ],
-    [
-      "individually hidden judge dimension rows",
-      ".judge-dimension-scores > div { display: none !important; }",
-    ],
-    [
-      "hidden candidate identity",
-      ".entry-rank, .entry-title, .entry-identity { display: none !important; }",
-    ],
-    [
-      "hidden judge score details",
-      ".judge-score, .judge-dimension-scores { display: none !important; }",
-    ],
-  ])(
-    "falls back for %s champion CSS",
-    async (_name, cssRule) => {
-      const generationsRoot = await createTestTempRoot(
-        "local-maxima-gallery-visibility-adversarial-",
-      );
-      const { generation, result: completed } =
-        await createCompletedFixtureGeneration(generationsRoot);
-      const champion = completed.leaderboard.entries.find(
-        (entry) => entry.rank === 1 && entry.status === "valid",
-      );
-      expect(champion).toBeDefined();
-      if (champion === undefined) throw new Error("fixture generation has no champion");
-      await appendChampionCss(
-        generation.generationPath,
-        champion.contestantId,
-        cssRule,
-      );
-
-      const built = await buildGallery({
-        repositoryRoot,
-        generationPath: generation.generationPath,
-      });
-      expect(built.championContestantId).toBe(champion.contestantId);
-      expect(built.stylesheetKind).toBe("fallback");
-      expect(await readFile(join(built.publicPath, "champion.css"))).toEqual(
-        await readFile(join(generation.generationPath, "challenge/fallback.css")),
-      );
-      const html = await readFile(join(built.publicPath, "index.html"), "utf8");
-      expect(html).toContain("Combined");
-      expect(html).toContain("Judge notes");
-      expect(
-        (await readdir(generation.generationPath)).filter((name) =>
-          name.startsWith(".public.build-"),
-        ),
-      ).toEqual([]);
-    },
-    30000,
-  );
 
   it("formats repeating three-judge aggregate means with exactly two decimals", async () => {
     const repositoryParent = await createTestTempRoot(
@@ -909,7 +811,6 @@ describe("static public gallery", () => {
       "champion.css",
       "designs",
       "fonts",
-      "gallery-layout.css",
       "gallery-screenshot.png",
       "gallery-viewport.png",
       "index.html",
@@ -972,6 +873,7 @@ describe("static public gallery", () => {
     const fullMetadata = await sharp(fullPath).metadata();
     expect(fullMetadata).toMatchObject({ format: "png", width: 1280 });
     expect(fullMetadata.height).toBeGreaterThan(1200);
+    expect(fullMetadata.height).toBeLessThanOrEqual(12000);
 
     const html = await readFile(join(result.gallery.publicPath, "index.html"), "utf8");
     const designPath = `designs/${firstEntry.contestantId}`;
@@ -1021,34 +923,7 @@ describe("static public gallery", () => {
     expect(judgeNotesMarkup).toContain("Runtime");
     expect(judgeNotesMarkup).toContain("Estimated cost");
 
-    expect(html).toContain('href="gallery-layout.css"');
-    await expect(
-      readFile(join(result.gallery.publicPath, "gallery-layout.css"), "utf8"),
-    ).resolves.toContain(".leaderboard-grid");
-
-    const browser = await chromium.launch({ headless: true });
-    try {
-      const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
-      await page.goto(`file://${join(result.gallery.publicPath, "index.html")}`);
-      const cards = await page.locator(".entry-card").evaluateAll((nodes) =>
-        nodes.map((node) => {
-          const card = node.getBoundingClientRect();
-          const visual = node.querySelector(".entry-visual")!.getBoundingClientRect();
-          return {
-            top: card.top,
-            bottom: card.bottom,
-            left: card.left,
-            screenshotShare: visual.height / card.height,
-          };
-        }),
-      );
-      expect(cards).toHaveLength(3);
-      expect(cards[1]!.top).toBeGreaterThan(cards[0]!.bottom);
-      expect(cards[1]!.left).toBe(cards[0]!.left);
-      expect(cards.every((card) => card.screenshotShare >= 0.88)).toBe(true);
-    } finally {
-      await browser.close();
-    }
+    expect(html).not.toContain("gallery-layout.css");
   }, 30000);
 
   it("escapes model strings while preserving the script-free local-resource policy", async () => {

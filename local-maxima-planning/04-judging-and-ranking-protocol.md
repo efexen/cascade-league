@@ -12,8 +12,8 @@ For each candidate, a judge receives:
 
 1. the fixed challenge description and rules;
 2. the scoring rubric and anchors;
-3. one full-resolution `1440 × 1200` screenshot of the anonymous candidate;
-4. the anonymous cohort contact sheet;
+3. one full-height screenshot of the anonymous candidate, at the configured viewport width and capped at 12,000 pixels;
+4. the anonymous cohort contact sheet made from fixed viewport previews;
 5. the candidate CSS with comments removed; and
 6. the required JSON response schema.
 
@@ -51,7 +51,7 @@ CSS comments are excluded because they can leak identity or contain instructions
 
 ### 1. Hierarchy and readability — 15 points
 
-Assess whether the viewer can immediately understand the project, rules, ranking, and key scores.
+Assess whether the viewer can understand the project, rules, ranking, and key scores from what the design makes available in the full-height candidate screenshot. Consider readability, information access, first-viewport composition, and any content placed off-page, clipped, covered, or hidden. Judge those choices in context: deliberate experiments may be effective, while choices that make important information hard to access should lose clarity credit. Do not automatically assign zero because content is hidden or outside the viewport.
 
 - `0–3`: Content is unreadable, obscured, or structurally confusing.
 - `4–7`: Basic content is visible but hierarchy is weak or tiring.
@@ -61,7 +61,7 @@ Assess whether the viewer can immediately understand the project, rules, ranking
 
 ### 2. Composition — 15 points
 
-Assess use of the fixed desktop canvas, spacing, balance, rhythm, density, and relationship between explanation and gallery.
+Assess use of the fixed-width desktop canvas across the full-height screenshot, spacing, balance, rhythm, density, first-viewport composition, and relationship between explanation and gallery. Consider clipped and off-page content in context; it can support an intentional composition, but may weaken access or balance.
 
 - `0–3`: Broken or incoherent layout.
 - `4–7`: Functional but poorly balanced or template-like.
@@ -288,4 +288,3 @@ Any of the following changes must increment the judging protocol version and nor
 - adding pairwise results to official ranking;
 - changing judge anonymity; or
 - combining human votes with AI scores.
-

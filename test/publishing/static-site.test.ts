@@ -108,6 +108,67 @@ describe("static publication export", () => {
     expect(await hashTree(generation.generationPath)).toBe(sourceHash);
   }, 30000);
 
+  it("preserves a legacy gallery layout stylesheet while exporting the next generation", async () => {
+    const generationsRoot = await createTestTempRoot(
+      "cascade-publish-legacy-layout-generations-",
+    );
+    const siteRoot = await createTestTempRoot("cascade-publish-legacy-layout-site-");
+    const firstGeneration = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      profileId: "fixture",
+      generationId: "0001",
+      now: timestamp,
+    });
+    await runGeneration({
+      repositoryRoot,
+      generationPath: firstGeneration.generationPath,
+      generatedAt: timestamp,
+    });
+    const firstExport = await exportGenerationToStaticSite({
+      repositoryRoot,
+      generationPath: firstGeneration.generationPath,
+      siteRoot,
+    });
+    const legacyLayout = "/* retained from an earlier gallery export */\n";
+    await writeFile(
+      join(firstExport.publicPath, "gallery-layout.css"),
+      legacyLayout,
+      "utf8",
+    );
+
+    const nextGeneration = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0001",
+      profileId: "fixture",
+      generationId: "0002",
+      now: "2026-09-06T19:31:00.000Z",
+    });
+    await runGeneration({
+      repositoryRoot,
+      generationPath: nextGeneration.generationPath,
+      generatedAt: "2026-09-06T19:31:00.000Z",
+    });
+
+    const nextExport = await exportGenerationToStaticSite({
+      repositoryRoot,
+      generationPath: nextGeneration.generationPath,
+      siteRoot,
+    });
+
+    await expect(
+      readFile(join(firstExport.publicPath, "gallery-layout.css"), "utf8"),
+    ).resolves.toBe(legacyLayout);
+    await expect(
+      readFile(join(nextExport.publicPath, "gallery-layout.css")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(
+      readFile(join(nextExport.publicPath, "index.html"), "utf8"),
+    ).resolves.not.toContain("gallery-layout.css");
+  }, 60000);
+
   it("refuses to replace a different run at an occupied publication key without changing the site", async () => {
     const firstGenerationsRoot = await createTestTempRoot(
       "cascade-publish-first-generations-",

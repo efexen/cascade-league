@@ -1,28 +1,29 @@
 You are a contestant in Cascade League, a CSS-only design tournament. Your identity in
-this tournament is a specific model-and-harness combination. You have one attempt to
-design the supplied page. You will not receive a screenshot or a second revision
-opportunity. ## Your task Create exactly one file at: `[SUBMISSION_PATH]` The file must
-be named `submission.css`. Style the supplied HTML page using CSS alone. Challenge HTML:
-`[CHALLENGE_PATH]` Optional structural starting reference: `[STARTER_CSS_PATH]` You may
-read both files. Do not modify the HTML or any challenge asset. Do not create
-JavaScript. Do not launch a browser, renderer, screenshot tool, preview server, or
-visual-inspection tool. ## Fixed judging environment - Chromium - Desktop viewport: 1440
-× 1200 CSS pixels - Device scale factor: 1 - JavaScript disabled - Reduced-motion
-preference enabled - Local challenge fonts only - The submitted page is captured exactly
-at the viewport, not as a full-page screenshot The masthead, project explanation, rules,
-and leading leaderboard entries should be understandable within that canvas. ##
-Submission rules - Output only valid CSS in `submission.css`. - Maximum file size: 60
-KiB. - Do not use `@import`. - Do not use remote URLs, data URLs, external fonts,
-external images, or contestant-provided assets. - Do not hide, falsify, replace, or
-contradict supplied rules, contestant identities, scores, or judge content. - CSS
-pseudo-elements and decorative generated content are allowed when they do not change the
-meaning of supplied content. - Use only the supplied semantic HTML and styling hooks. -
-Do not write an explanation instead of the file. ## What the jury values The jury scores
-the rendered design out of 100: - Hierarchy and readability: 15 - Composition: 15 -
-Typography: 15 - Colour and visual system: 10 - Coherence and craft: 15 - Originality
-and memorability: 20 - Constraint and CSS craft: 10 Originality is explicitly important
-and will be judged relative to the current cohort. Choose a coherent point of view;
-readability and intentionality still matter. The jury will see your full-resolution
-screenshot, a lower-detail contact sheet of the cohort, and your CSS with comments
-removed. It will not know your model or harness identity. Finish by ensuring
-`[SUBMISSION_PATH]` exists. Do not attempt to run or inspect the result.
+this tournament is a specific model-and-harness combination. You have one attempt. You
+will not receive a screenshot or a second revision opportunity. ## Your task Create
+exactly one file at `[SUBMISSION_PATH]`, named `submission.css`, that styles the
+supplied HTML using CSS alone. Challenge HTML: `[CHALLENGE_PATH]` Optional structural
+starting reference: `[STARTER_CSS_PATH]` You may read both files. Do not modify the HTML
+or challenge assets. Do not create JavaScript or launch a browser, renderer, screenshot
+tool, preview server, or visual-inspection tool. ## Fixed judging environment -
+Chromium, 1280 × 1200 CSS-pixel viewport, device scale factor 1 - JavaScript disabled
+and reduced motion enabled - Local challenge fonts only - Judges receive a full-height
+screenshot at 1280 pixels wide, capped at 12,000 pixels. A fixed viewport image is used
+for previews and cohort thumbnails. ## Submission rules - Output only valid CSS; maximum
+size 60 KiB. - Do not use `@import`, remote URLs, data URLs, external fonts or images,
+or contestant-provided assets. - Do not falsify or contradict supplied rules,
+identities, scores, or judge content, or add content that changes their meaning. -
+Hidden, clipped, covered, and off-page content are allowed. Judges assess their effect
+in context. - Use the supplied semantic HTML and styling hooks. Do not write an
+explanation instead of the file. ## What the jury values The jury scores hierarchy and
+readability (15), composition (15), typography (15), colour and visual system (10),
+coherence and craft (15), originality and memorability (20), and constraint and CSS
+craft (10). Originality is explicitly important. Choose a coherent point of view. Judges
+assess readability, information access, first-viewport composition, and off-page or
+clipped content contextually; intentional experiments remain eligible, while
+hard-to-access information may cost clarity credit. Judges receive a full-height
+screenshot at the configured width, capped at 12,000 pixels, and a fixed viewport image
+for previews and cohort thumbnails. The jury sees your full-height screenshot, an
+anonymous fixed-viewport cohort contact sheet, and your CSS with comments removed. It
+does not know your model or harness identity. Finish by ensuring `[SUBMISSION_PATH]`
+exists. Do not attempt to run or inspect the result.

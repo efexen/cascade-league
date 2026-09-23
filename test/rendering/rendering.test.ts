@@ -56,7 +56,41 @@ const html = `<!doctype html>
 </ol></section><section id="judge-notes">Notes</section></main></body></html>`;
 
 describe("deterministic candidate rendering", () => {
-  it("captures fixed and full-height views at the configured width", async () => {
+  it("captures and keeps a visually hidden design for judging", async () => {
+    const root = await createTestTempRoot("local-maxima-render-hidden-design-");
+    await writeFile(join(root, "challenge.html"), html, "utf8");
+    await writeFile(
+      join(root, "submission.css"),
+      "body { opacity: 0; min-height: 4000px; }",
+      "utf8",
+    );
+    const screenshotPath = join(root, "screenshot.png");
+
+    const result = await renderCandidate({
+      candidateRootPath: root,
+      screenshotPath,
+      challengeConfig: config,
+    });
+
+    expect(result.status).toBe("valid");
+    expect(result.screenshotPath).toBe(screenshotPath);
+    expect(await sharp(screenshotPath).metadata()).toMatchObject({
+      format: "png",
+      width: config.viewport.width,
+    });
+    expect((await sharp(screenshotPath).metadata()).height).toBeGreaterThan(
+      config.viewport.height,
+    );
+    expect(await sharp(join(root, "screenshot-viewport.png")).metadata()).toMatchObject(
+      {
+        format: "png",
+        width: config.viewport.width,
+        height: config.viewport.height,
+      },
+    );
+  });
+
+  it("captures a full-height judge image and fixed viewport preview", async () => {
     const root = await createTestTempRoot("local-maxima-render-");
     await mkdir(root, { recursive: true });
     await writeFile(join(root, "challenge.html"), html, "utf8");
@@ -92,154 +126,39 @@ describe("deterministic candidate rendering", () => {
     expect(viewportImage.format).toBe("png");
     expect(viewportImage.width).toBe(1280);
     expect(viewportImage.height).toBe(1200);
+    expect(viewportImage).toMatchObject({ width: image.width, height: 1200 });
     expect(result.viewportScreenshotPath).toBe(viewportScreenshotPath);
   });
 
-  it("caps a full-height candidate screenshot at 12000 pixels", async () => {
-    const root = await createTestTempRoot("cascade-league-render-full-cap-");
+  it("caps full-height judging while keeping hidden and overflowing CSS valid", async () => {
+    const root = await createTestTempRoot("local-maxima-render-creative-css-");
     await writeFile(join(root, "challenge.html"), html, "utf8");
     await writeFile(
       join(root, "submission.css"),
-      "body { margin: 0; min-height: 15000px; } .leaderboard-grid { display: grid; grid-template-columns: repeat(3, 1fr); } .entry-card { min-height: 180px; }",
+      "body { width: 3000px; min-height: 16000px; } #rules { display:none; } #leaderboard { clip-path: inset(100%); } .entry-card { mask-image: linear-gradient(transparent, transparent); }",
       "utf8",
     );
     const screenshotPath = join(root, "screenshot.png");
-    const viewportScreenshotPath = join(root, "screenshot-viewport.png");
-
     const result = await renderCandidate({
       candidateRootPath: root,
       screenshotPath,
-      viewportScreenshotPath,
       challengeConfig: config,
     });
 
-    expect(
-      result.status,
-      `${result.errors.join(" | ")} ${JSON.stringify(result.renderChecks)}`,
-    ).toBe("valid");
+    expect(result.status).toBe("valid");
+    expect(result.warnings.join(" ")).toContain("12000px");
     expect(await sharp(screenshotPath).metadata()).toMatchObject({
       format: "png",
-      width: 1280,
+      width: config.viewport.width,
       height: 12000,
     });
-    expect(result.warnings.join(" ")).toContain("15000");
-    expect(result.warnings.join(" ")).toContain("12000");
-  });
-
-  it("warns instead of rejecting when leaderboard entries begin below the first viewport", async () => {
-    const root = await createTestTempRoot("cascade-league-render-below-fold-");
-    await writeFile(join(root, "challenge.html"), html, "utf8");
-    await writeFile(
-      join(root, "submission.css"),
-      "body { margin: 0; } #leaderboard { margin-top: 1400px; } .leaderboard-grid { display: grid; grid-template-columns: repeat(3, 1fr); } .entry-card { min-height: 180px; }",
-      "utf8",
+    expect(await sharp(join(root, "screenshot-viewport.png")).metadata()).toMatchObject(
+      {
+        format: "png",
+        width: config.viewport.width,
+        height: config.viewport.height,
+      },
     );
-
-    const result = await renderCandidate({
-      candidateRootPath: root,
-      screenshotPath: join(root, "screenshot.png"),
-      viewportScreenshotPath: join(root, "screenshot-viewport.png"),
-      challengeConfig: config,
-    });
-
-    expect(
-      result.status,
-      `${result.errors.join(" | ")} ${JSON.stringify(result.renderChecks)}`,
-    ).toBe("valid");
-    expect(
-      result.renderChecks.find((entry) => entry.code === "leading_entries_viewport")
-        ?.status,
-    ).toBe("warning");
-    expect(result.warnings.join(" ")).toContain("first viewport");
-  });
-
-  it("fails when an ancestor makes the whole page fully transparent", async () => {
-    const root = await createTestTempRoot("local-maxima-render-transparent-body-");
-    await writeFile(join(root, "challenge.html"), html, "utf8");
-    await writeFile(join(root, "submission.css"), "body { opacity: 0; }", "utf8");
-    const screenshotPath = join(root, "screenshot.png");
-
-    const result = await renderCandidate({
-      candidateRootPath: root,
-      screenshotPath,
-      challengeConfig: config,
-    });
-
-    expect(result.status).toBe("render_failed");
-    expect(result.screenshotPath).toBeNull();
-    expect(
-      result.renderChecks.find((entry) => entry.code === "required_content_visibility")
-        ?.status,
-    ).toBe("failed");
-    expect(result.errors.join(" ")).toContain("body");
-    await expect(readFile(screenshotPath)).rejects.toThrow();
-  });
-
-  it("fails when an intermediate ancestor makes required content transparent", async () => {
-    const root = await createTestTempRoot(
-      "local-maxima-render-transparent-intermediate-",
-    );
-    await writeFile(
-      join(root, "challenge.html"),
-      html.replace(
-        '<section id="introduction">Intro</section>',
-        '<div class="transparent-wrapper"><section id="introduction">Intro</section></div>',
-      ),
-      "utf8",
-    );
-    await writeFile(
-      join(root, "submission.css"),
-      ".transparent-wrapper { opacity: 0; }",
-      "utf8",
-    );
-    const screenshotPath = join(root, "screenshot.png");
-
-    const result = await renderCandidate({
-      candidateRootPath: root,
-      screenshotPath,
-      challengeConfig: config,
-    });
-
-    expect(result.status).toBe("render_failed");
-    expect(result.screenshotPath).toBeNull();
-    expect(result.errors.join(" ")).toContain("#introduction");
-    expect(result.errors.join(" ")).toContain(".transparent-wrapper");
-    await expect(readFile(screenshotPath)).rejects.toThrow();
-  });
-
-  it("keeps a normal page valid with a non-zero ancestor opacity", async () => {
-    const root = await createTestTempRoot("local-maxima-render-opaque-intermediate-");
-    await writeFile(
-      join(root, "challenge.html"),
-      html.replace(
-        '<section id="introduction">Intro</section>',
-        '<div class="opaque-wrapper"><section id="introduction">Intro</section></div>',
-      ),
-      "utf8",
-    );
-    await writeFile(
-      join(root, "submission.css"),
-      ".opaque-wrapper { opacity: 0.5; }",
-      "utf8",
-    );
-    const screenshotPath = join(root, "screenshot.png");
-
-    const result = await renderCandidate({
-      candidateRootPath: root,
-      screenshotPath,
-      challengeConfig: config,
-    });
-
-    expect(
-      result.status,
-      `${result.errors.join(" | ")} ${JSON.stringify(result.renderChecks)}`,
-    ).toBe("valid");
-    expect(result.screenshotPath).toBe(screenshotPath);
-    expect(
-      result.renderChecks.find((entry) => entry.code === "required_content_visibility")
-        ?.status,
-    ).toBe("passed");
-    await expect(readFile(screenshotPath)).resolves.toBeTruthy();
   });
 
   it("records and aborts an external browser request", async () => {

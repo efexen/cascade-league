@@ -23,7 +23,7 @@ import {
 import { publishFilePairAtomically } from "./atomic-pair.js";
 
 const NOT_RECORDED = "not-recorded";
-const EFFECTIVE_OPACITY_EPSILON = 0.001;
+const FULL_HEIGHT_CAP = 12000;
 const require = createRequire(import.meta.url);
 
 export interface CandidateRenderInput {
@@ -246,7 +246,7 @@ export async function renderCandidate(
     });
     page = await context.newPage();
     await page.goto(`${server.origin}/challenge.html`, {
-      waitUntil: "domcontentloaded",
+      waitUntil: "load",
     });
     checks.push(check("document_loaded", "passed", "Challenge document loaded"));
     await page.evaluate(async () => {
@@ -263,181 +263,9 @@ export async function renderCandidate(
         fontStatus,
       ),
     );
+    if (fontStatus !== "loaded") errors.push("challenge fonts did not finish loading");
     await waitForRenderTick(page);
 
-    for (const selector of input.challengeConfig.requiredSelectors) {
-      let visible = false;
-      try {
-        visible = await page.locator(selector).first().isVisible();
-      } catch {
-        visible = false;
-      }
-      checks.push(
-        check(
-          `required_selector:${selector.replace(/[^a-zA-Z0-9]+/gu, "_")}`,
-          visible ? "passed" : "failed",
-          visible ? `${selector} is visible` : `${selector} is missing or not visible`,
-          visible,
-        ),
-      );
-      if (!visible) errors.push(`required selector is not visible: ${selector}`);
-    }
-
-    const layout = await page.evaluate(() => {
-      const firstViewport = {
-        top: 0,
-        right: window.innerWidth,
-        bottom: window.innerHeight,
-        left: 0,
-      };
-      const entries = Array.from(document.querySelectorAll(".leaderboard-grid .entry"))
-        .slice(0, 3)
-        .map((element) => {
-          const box = element.getBoundingClientRect();
-          return (
-            box.bottom > firstViewport.top &&
-            box.top < firstViewport.bottom &&
-            box.right > firstViewport.left &&
-            box.left < firstViewport.right
-          );
-        });
-      const bodyStyle = getComputedStyle(document.body);
-      return {
-        horizontalOverflow: Math.max(
-          0,
-          document.documentElement.scrollWidth - window.innerWidth,
-        ),
-        bodyOverflowX: bodyStyle.overflowX,
-        bodyOverflowY: bodyStyle.overflowY,
-        leadingEntriesVisible: entries,
-      };
-    });
-    const overflowPassed = layout.horizontalOverflow <= 2;
-    checks.push(
-      check(
-        "horizontal_overflow",
-        overflowPassed ? "passed" : "failed",
-        overflowPassed
-          ? "No horizontal overflow beyond two CSS pixels"
-          : "Horizontal overflow exceeds two CSS pixels",
-        layout.horizontalOverflow,
-      ),
-    );
-    if (!overflowPassed) errors.push("horizontal overflow exceeds two CSS pixels");
-    checks.push(
-      check(
-        "body_overflow",
-        "passed",
-        `Body overflow rules observed: x=${layout.bodyOverflowX}, y=${layout.bodyOverflowY}`,
-      ),
-    );
-    if (layout.leadingEntriesVisible.length >= 3) {
-      const leadingPassed = layout.leadingEntriesVisible.every(Boolean);
-      checks.push(
-        check(
-          "leading_entries_viewport",
-          leadingPassed ? "passed" : "warning",
-          leadingPassed
-            ? "The first three leaderboard entries intersect the first viewport"
-            : "A leading leaderboard entry is below or outside the first viewport",
-        ),
-      );
-      if (!leadingPassed)
-        warnings.push(
-          "the first three leaderboard entries do not intersect the first viewport",
-        );
-    } else {
-      checks.push(
-        check(
-          "leading_entries_viewport",
-          "warning",
-          "Fewer than three leaderboard entries were present",
-        ),
-      );
-      warnings.push("fewer than three leaderboard entries were present");
-    }
-
-    const hiddenRequired = await page.evaluate(
-      ({ selectors, opacityEpsilon }) => {
-        const failures: string[] = [];
-
-        for (const selector of selectors) {
-          const element = document.querySelector(selector);
-          if (element === null) {
-            failures.push(`${selector} (missing)`);
-            continue;
-          }
-
-          let effectiveOpacity = 1;
-          const hidingElements: string[] = [];
-          const opacityElements: string[] = [];
-          for (
-            let ancestor: Element | null = element;
-            ancestor !== null;
-            ancestor = ancestor.parentElement
-          ) {
-            const style = getComputedStyle(ancestor);
-            const firstClass = (ancestor.getAttribute("class") ?? "")
-              .trim()
-              .split(/\s+/u)[0];
-            const descriptor =
-              ancestor.id !== ""
-                ? `#${ancestor.id}`
-                : firstClass === undefined || firstClass === ""
-                  ? ancestor.tagName.toLowerCase()
-                  : `${ancestor.tagName.toLowerCase()}.${firstClass}`;
-            if (style.display === "none") {
-              hidingElements.push(`${descriptor} display:none`);
-            }
-            if (style.visibility === "hidden" || style.visibility === "collapse") {
-              hidingElements.push(`${descriptor} visibility:${style.visibility}`);
-            }
-
-            const opacity = Number.parseFloat(style.opacity);
-            if (Number.isFinite(opacity)) {
-              effectiveOpacity *= opacity;
-              if (opacity <= opacityEpsilon) {
-                opacityElements.push(`${descriptor} opacity:${style.opacity}`);
-              }
-            }
-          }
-
-          const reasons: string[] = [...hidingElements];
-          if (effectiveOpacity <= opacityEpsilon) {
-            const opacityDetail =
-              opacityElements.length === 0
-                ? `effective opacity:${effectiveOpacity}`
-                : `effective opacity:${effectiveOpacity} via ${opacityElements.join(
-                    " -> ",
-                  )}`;
-            reasons.push(opacityDetail);
-          }
-          if (reasons.length > 0) {
-            failures.push(`${selector} (${reasons.join("; ")})`);
-          }
-        }
-        return failures;
-      },
-      {
-        selectors: input.challengeConfig.requiredSelectors,
-        opacityEpsilon: EFFECTIVE_OPACITY_EPSILON,
-      },
-    );
-    const hiddenPassed = hiddenRequired.length === 0;
-    checks.push(
-      check(
-        "required_content_visibility",
-        hiddenPassed ? "passed" : "failed",
-        hiddenPassed
-          ? "Required content is not hidden or transparent"
-          : `Hidden or transparent required selectors: ${hiddenRequired.join(", ")}`,
-      ),
-    );
-    if (!hiddenPassed) {
-      errors.push(
-        `required content is hidden or transparent: ${hiddenRequired.join(", ")}`,
-      );
-    }
     const externalPassed = externalRequests.length === 0;
     checks.push(
       check(
@@ -452,42 +280,27 @@ export async function renderCandidate(
     if (!externalPassed) errors.push("non-loopback network requests were attempted");
 
     if (errors.length === 0) {
-      const FULL_HEIGHT_CAP = 12000;
       const viewportPath =
         input.viewportScreenshotPath ??
         join(dirname(input.screenshotPath), "screenshot-viewport.png");
-      let viewportWasPresent = false;
-      try {
-        await lstat(viewportPath);
-        viewportWasPresent = true;
-      } catch (error) {
-        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
-          throw error;
-        }
-      }
       const documentHeight = await page.evaluate(() => {
-        try {
-          const candidates = [
-            document.documentElement?.scrollHeight,
-            document.body?.scrollHeight,
-            document.documentElement?.offsetHeight,
-            document.body?.offsetHeight,
-            document.documentElement?.clientHeight,
-          ];
-          const finite = candidates.filter(
-            (value): value is number =>
-              typeof value === "number" && Number.isFinite(value) && value > 0,
-          );
-          if (finite.length === 0) return window.innerHeight;
-          return Math.max(...finite);
-        } catch {
-          return window.innerHeight;
-        }
+        const candidates = [
+          document.documentElement?.scrollHeight,
+          document.body?.scrollHeight,
+          document.documentElement?.offsetHeight,
+          document.body?.offsetHeight,
+          document.documentElement?.clientHeight,
+        ];
+        const finite = candidates.filter(
+          (value): value is number =>
+            typeof value === "number" && Number.isFinite(value) && value > 0,
+        );
+        return finite.length === 0 ? window.innerHeight : Math.max(...finite);
       });
       const safeHeight = Number.isFinite(documentHeight)
         ? Math.max(1, Math.floor(documentHeight))
         : input.challengeConfig.viewport.height;
-      const cappedHeight = Math.min(safeHeight, FULL_HEIGHT_CAP);
+      const capturedHeight = Math.min(safeHeight, FULL_HEIGHT_CAP);
       if (safeHeight > FULL_HEIGHT_CAP) {
         warnings.push(
           `document height ${safeHeight}px exceeds cap ${FULL_HEIGHT_CAP}px; captured top ${FULL_HEIGHT_CAP}px`,
@@ -498,151 +311,107 @@ export async function renderCandidate(
       screenshotAttempted = true;
       screenshotTemporaryPath = `${input.screenshotPath}.tmp-${process.pid}-${randomBytes(8).toString("hex")}`;
       const viewportTemporaryPath = `${viewportPath}.tmp-${process.pid}-${randomBytes(8).toString("hex")}`;
-      let viewportTemporaryActive = false;
       try {
         if (options.screenshot === undefined) {
-          const expectedWidth = input.challengeConfig.viewport.width;
           const cdp = await context.newCDPSession(page);
-          let capture: { data: string };
           try {
-            capture = await cdp.send("Page.captureScreenshot", {
+            const capture = await cdp.send("Page.captureScreenshot", {
               format: "png",
               fromSurface: true,
               captureBeyondViewport: true,
               clip: {
                 x: 0,
                 y: 0,
-                width: expectedWidth,
-                height: cappedHeight,
+                width: input.challengeConfig.viewport.width,
+                height: capturedHeight,
                 scale: 1,
               },
             });
+            await writeFile(
+              screenshotTemporaryPath,
+              Buffer.from(capture.data, "base64"),
+            );
           } finally {
             await cdp.detach().catch(() => undefined);
           }
-          await writeFile(screenshotTemporaryPath, Buffer.from(capture.data, "base64"));
-          const image = await sharp(screenshotTemporaryPath).metadata();
-          viewportTemporaryActive = true;
-          await page.screenshot({
-            path: viewportTemporaryPath,
-            fullPage: false,
-            type: "png",
-          });
-          const screenshotPassed =
-            image.width === expectedWidth &&
-            image.height === cappedHeight &&
-            image.format === "png";
-          checks.push(
-            check(
-              "screenshot_dimensions",
-              screenshotPassed ? "passed" : "failed",
-              screenshotPassed
-                ? `Screenshot is a ${String(expectedWidth)}×${String(cappedHeight)} PNG`
-                : "Screenshot dimensions or format are incorrect",
-              `${String(image.width)}x${String(image.height)}`,
-            ),
-          );
-          if (!screenshotPassed) {
-            errors.push(
-              `screenshot is not an exact ${String(expectedWidth)}×${String(cappedHeight)} PNG`,
-            );
-            await rm(screenshotTemporaryPath, { force: true });
-            screenshotTemporaryPath = null;
-          }
-          const viewportImage = await sharp(viewportTemporaryPath).metadata();
-          const viewportPassed =
-            viewportImage.width === expectedWidth &&
-            viewportImage.height === input.challengeConfig.viewport.height &&
-            viewportImage.format === "png";
-          checks.push(
-            check(
-              "viewport_screenshot_dimensions",
-              viewportPassed ? "passed" : "failed",
-              viewportPassed
-                ? `Viewport screenshot is an exact ${String(expectedWidth)}×${String(input.challengeConfig.viewport.height)} PNG`
-                : "Viewport screenshot dimensions or format are incorrect",
-              `${String(viewportImage.width)}x${String(viewportImage.height)}`,
-            ),
-          );
-          if (!viewportPassed) {
-            errors.push(
-              `viewport screenshot is not an exact ${String(expectedWidth)}×${String(input.challengeConfig.viewport.height)} PNG`,
-            );
-            await rm(viewportTemporaryPath, { force: true });
-            viewportTemporaryActive = false;
-          } else if (errors.length === 0 && screenshotTemporaryPath !== null) {
-            await publishFilePairAtomically(
-              {
-                firstTemporaryPath: screenshotTemporaryPath,
-                firstDestinationPath: input.screenshotPath,
-                secondTemporaryPath: viewportTemporaryPath,
-                secondDestinationPath: viewportPath,
-              },
-              options.moveFile === undefined ? {} : { moveFile: options.moveFile },
-            );
-            screenshotTemporaryPath = null;
-            viewportTemporaryActive = false;
-          } else {
-            await rm(viewportTemporaryPath, { force: true });
-            viewportTemporaryActive = false;
-          }
-          if (errors.length > 0) {
-            if (!screenshotWasPresent) await rm(input.screenshotPath, { force: true });
-            if (!viewportWasPresent) await rm(viewportPath, { force: true });
-          }
-          resolvedViewportPath = errors.length === 0 ? viewportPath : null;
         } else {
           await options.screenshot(page, screenshotTemporaryPath);
-          const image = await sharp(screenshotTemporaryPath).metadata();
-          const expectedWidth = input.challengeConfig.viewport.width;
-          const screenshotPassed =
-            image.width === expectedWidth &&
-            image.height === cappedHeight &&
-            image.format === "png";
-          checks.push(
-            check(
-              "screenshot_dimensions",
-              screenshotPassed ? "passed" : "failed",
-              screenshotPassed
-                ? `Screenshot is a ${String(expectedWidth)}×${String(cappedHeight)} PNG`
-                : "Screenshot dimensions or format are incorrect",
-              `${String(image.width)}x${String(image.height)}`,
-            ),
+        }
+        const image = await sharp(screenshotTemporaryPath).metadata();
+        const expectedWidth = input.challengeConfig.viewport.width;
+        const screenshotPassed =
+          image.width === expectedWidth &&
+          image.height === capturedHeight &&
+          image.format === "png";
+        checks.push(
+          check(
+            "screenshot_dimensions",
+            screenshotPassed ? "passed" : "failed",
+            screenshotPassed
+              ? `Screenshot is a bounded ${String(expectedWidth)}×${String(capturedHeight)} PNG`
+              : "Screenshot dimensions or format are incorrect",
+            `${String(image.width)}x${String(image.height)}`,
+          ),
+        );
+        await page.screenshot({
+          path: viewportTemporaryPath,
+          fullPage: false,
+          type: "png",
+        });
+        const viewportImage = await sharp(viewportTemporaryPath).metadata();
+        const viewportPassed =
+          viewportImage.width === expectedWidth &&
+          viewportImage.height === input.challengeConfig.viewport.height &&
+          viewportImage.format === "png";
+        checks.push(
+          check(
+            "viewport_screenshot_dimensions",
+            viewportPassed ? "passed" : "failed",
+            viewportPassed
+              ? `Viewport preview is an exact ${String(expectedWidth)}×${String(input.challengeConfig.viewport.height)} PNG`
+              : "Viewport screenshot was not captured at the configured dimensions",
+            `${String(viewportImage.width)}x${String(viewportImage.height)}`,
+          ),
+        );
+        if (!screenshotPassed) {
+          errors.push(
+            `screenshot is not an exact ${String(expectedWidth)}×${String(capturedHeight)} PNG`,
           );
-          checks.push(
-            check(
-              "viewport_screenshot_dimensions",
-              "not_run",
-              "Viewport screenshot was not captured",
-            ),
+        }
+        if (!viewportPassed) {
+          errors.push(
+            `viewport screenshot is not an exact ${String(expectedWidth)}×${String(input.challengeConfig.viewport.height)} PNG`,
           );
-          if (!screenshotPassed) {
-            errors.push(
-              `screenshot is not an exact ${String(expectedWidth)}×${String(cappedHeight)} PNG`,
-            );
-            await rm(screenshotTemporaryPath, { force: true });
-            screenshotTemporaryPath = null;
-          } else {
-            await rename(screenshotTemporaryPath, input.screenshotPath);
-            screenshotTemporaryPath = null;
-          }
+        }
+        if (screenshotPassed && viewportPassed) {
+          await publishFilePairAtomically(
+            {
+              firstTemporaryPath: screenshotTemporaryPath,
+              firstDestinationPath: input.screenshotPath,
+              secondTemporaryPath: viewportTemporaryPath,
+              secondDestinationPath: viewportPath,
+            },
+            options.moveFile === undefined ? {} : { moveFile: options.moveFile },
+          );
+          screenshotTemporaryPath = null;
+          resolvedViewportPath = viewportPath;
         }
       } finally {
-        if (viewportTemporaryActive) await rm(viewportTemporaryPath, { force: true });
+        await rm(viewportTemporaryPath, { force: true }).catch(() => undefined);
       }
     } else {
       checks.push(
         check(
           "screenshot_dimensions",
           "not_run",
-          "Screenshot was not captured because render checks failed",
+          "Screenshot was not captured because a render prerequisite failed",
         ),
       );
       checks.push(
         check(
           "viewport_screenshot_dimensions",
           "not_run",
-          "Viewport screenshot was not captured because render checks failed",
+          "Screenshot was not captured because a render prerequisite failed",
         ),
       );
     }

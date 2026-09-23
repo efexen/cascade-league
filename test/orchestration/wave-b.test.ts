@@ -572,7 +572,7 @@ describe("Wave-B fixture orchestration", () => {
     expect(manifest.status).toBe("judging_complete");
   }, 30000);
 
-  it("isolates static, execution, timeout, and render failures and judges only rendered candidates", async () => {
+  it("isolates static, execution, and timeout failures while judging visual overflow experiments", async () => {
     const mirrorRoot = await createTestTempRoot("local-maxima-wave-b-mixed-repo-");
     await cp(join(repositoryRoot, "challenge"), join(mirrorRoot, "challenge"), {
       recursive: true,
@@ -596,7 +596,7 @@ describe("Wave-B fixture orchestration", () => {
       ["mixed-no-submission", "no-submission"],
       ["mixed-failure", "failure"],
       ["mixed-timeout", "timeout"],
-      ["mixed-render-failure", "render-failure"],
+      ["mixed-overflow", "overflow"],
     ] as const;
     contestantsConfig.contestants = fixtures.map(([id, fixture]) => ({
       ...baseContestant,
@@ -662,7 +662,7 @@ describe("Wave-B fixture orchestration", () => {
 
     expect(
       result.contestants.map((contestant) => contestant.validation.status),
-    ).toEqual(["valid", "invalid", "invalid", "invalid", "invalid", "render_failed"]);
+    ).toEqual(["valid", "invalid", "invalid", "invalid", "invalid", "valid"]);
     expect(result.contestants.map((contestant) => contestant.run.status)).toEqual([
       "succeeded",
       "succeeded",
@@ -672,11 +672,11 @@ describe("Wave-B fixture orchestration", () => {
       "succeeded",
     ]);
     for (const judge of result.judges) {
-      expect(judge.assessmentOrder).toHaveLength(1);
-      expect(judge.candidates).toHaveLength(1);
+      expect(judge.assessmentOrder).toHaveLength(2);
+      expect(judge.candidates).toHaveLength(2);
       expect(judge.candidates[0]?.result.status).toBe("succeeded");
       expect(judge.awards?.status).toBe("succeeded");
-      expect(judge.awards?.awards?.awards).toEqual([]);
+      expect(judge.awards?.awards?.awards).toHaveLength(1);
     }
     await expect(readdir(join(result.judges[0]!.path, "workspaces"))).rejects.toThrow();
   }, 30000);

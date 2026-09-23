@@ -27,19 +27,6 @@ import {
   loadGalleryPresentation,
   validateLeaderboardIntegrity,
 } from "./presentation.js";
-import { GALLERY_LAYOUT_CSS } from "./layout.js";
-
-const GALLERY_LAYOUT_STYLESHEET_LINK =
-  '    <link rel="stylesheet" href="gallery-layout.css">';
-
-function attachGalleryLayoutStylesheet(html: string): string {
-  const closingHead = "  </head>";
-  const firstIndex = html.indexOf(closingHead);
-  if (firstIndex < 0 || html.indexOf(closingHead, firstIndex + 1) >= 0) {
-    throw new Error("public HTML must contain exactly one closing head tag");
-  }
-  return html.replace(closingHead, `${GALLERY_LAYOUT_STYLESHEET_LINK}\n${closingHead}`);
-}
 import {
   ChallengeConfigSchema,
   ContestantsConfigSchema,
@@ -59,7 +46,6 @@ import {
 import { writeTextAtomically } from "../contestants/support.js";
 import {
   renderStaticPage,
-  GalleryContentVisibilityError,
   type StaticPageRenderInput,
   type StaticPageRenderResult,
 } from "../rendering/static-page.js";
@@ -802,7 +788,6 @@ export async function buildGallery(
     judgesConfig.judges.map((judge) => [judge.id, judge.displayName]),
   );
   const stylesheet = await chooseStylesheet(generationPath, leaderboard);
-  const fallbackBytes = await readFile(join(challengeRoot, "fallback.css"));
   const publicPath = resolve(options.outputPath ?? join(generationPath, "public"));
   const temporaryPath = join(
     dirname(publicPath),
@@ -816,10 +801,6 @@ export async function buildGallery(
     await copyFonts(
       join(generationPath, "challenge/fonts"),
       join(temporaryPath, "fonts"),
-    );
-    await writeTextAtomically(
-      join(temporaryPath, "gallery-layout.css"),
-      GALLERY_LAYOUT_CSS,
     );
     for (const [index, entry] of leaderboard.entries.entries()) {
       const publicRelativePath = publicScreenshotName(index);
@@ -906,7 +887,7 @@ export async function buildGallery(
           selectedStylesheet.champion === null
             ? `No champion · ${selectedStylesheet.reason}`
             : selectedStylesheet.kind === "fallback"
-              ? "Rank 1 retained · fallback CSS used because champion content was hidden"
+              ? `Fallback CSS used · ${selectedStylesheet.reason}`
               : `Champion selected · ${selectedStylesheet.champion.displayName}`,
         entries: pageEntries(
           leaderboard,
@@ -919,7 +900,7 @@ export async function buildGallery(
         judgeMatrix: presentation.judgeMatrix,
         awards: pageAwards(leaderboard, judgeNames),
       });
-      const publicHtml = attachGalleryLayoutStylesheet(page.html);
+      const publicHtml = page.html;
       if (
         /<script\b/iu.test(publicHtml) ||
         /\b(?:src|href)=["'](?:https?:|\/\/)/iu.test(publicHtml)
@@ -957,30 +938,11 @@ export async function buildGallery(
         screenshotPath: join(temporaryPath, "gallery-screenshot.png"),
         viewportScreenshotPath: join(temporaryPath, "gallery-viewport.png"),
         challengeConfig,
-        verifyGalleryContent: true,
       });
     };
 
-    let selectedStylesheet = stylesheet;
-    try {
-      await renderPublic(selectedStylesheet);
-    } catch (error) {
-      if (
-        selectedStylesheet.kind !== "champion" ||
-        !(error instanceof GalleryContentVisibilityError)
-      ) {
-        throw error;
-      }
-      selectedStylesheet = {
-        kind: "fallback",
-        bytes: fallbackBytes,
-        champion: selectedStylesheet.champion,
-        reason: `${selectedStylesheet.champion?.displayName ?? "The rank-1 candidate"} remains the numeric rank-1 champion, but its CSS could not safely present required public content; the archived fallback stylesheet is used.`,
-      };
-      await rm(join(temporaryPath, "gallery-screenshot.png"), { force: true });
-      await rm(join(temporaryPath, "gallery-viewport.png"), { force: true });
-      await renderPublic(selectedStylesheet);
-    }
+    const selectedStylesheet = stylesheet;
+    await renderPublic(selectedStylesheet);
     await replacePublicDirectory(temporaryPath, publicPath);
     return {
       generationPath,

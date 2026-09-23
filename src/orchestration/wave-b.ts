@@ -215,6 +215,25 @@ function renderableCandidates(
   return candidates.filter(isRenderableCandidate);
 }
 
+async function viewportPreviewPath(
+  screenshotPath: string | null,
+): Promise<string | null> {
+  if (screenshotPath === null) return null;
+  const previewPath = join(dirname(screenshotPath), "screenshot-viewport.png");
+  try {
+    const status = await lstat(previewPath);
+    if (status.isSymbolicLink() || !status.isFile()) {
+      throw new Error("candidate viewport preview must be a regular file");
+    }
+    return previewPath;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return screenshotPath;
+    }
+    throw error;
+  }
+}
+
 function successfulJudgmentResults(
   candidates: readonly WaveBJudgeCandidateResult[],
 ): WaveBJudgeCandidateResult[] {
@@ -2396,11 +2415,13 @@ async function runOneJudge(input: {
       (await input.contactSheetBuilder({
         generationId: input.generationId,
         judgeId: input.judge.id,
-        candidates: input.contestants.map((contestant) => ({
-          anonymousCandidateId: contestant.anonymousCandidateId,
-          validationStatus: contestantContactStatus(contestant),
-          screenshotPath: contestant.screenshotPath,
-        })),
+        candidates: await Promise.all(
+          input.contestants.map(async (contestant) => ({
+            anonymousCandidateId: contestant.anonymousCandidateId,
+            validationStatus: contestantContactStatus(contestant),
+            screenshotPath: await viewportPreviewPath(contestant.screenshotPath),
+          })),
+        ),
         outputPath: join(judgePath, "contact-sheet.png"),
         orderPath: join(judgePath, "contact-sheet-order.json"),
         seed: domainSeparatedJudgeSeed(

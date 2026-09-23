@@ -13,16 +13,17 @@ The contestant roster and number of leaderboard cards are fixed for a season. Ph
 ## Desktop canvas
 
 - Browser: Playwright-bundled Chromium, version pinned by the repository lockfile.
-- Viewport: `1440 × 1200` CSS pixels.
+- Viewport: `1280 × 1200` CSS pixels for the current season configuration.
 - Device scale factor: `1`.
 - Colour scheme: `light` preference. A stylesheet may still choose a dark design.
 - Reduced motion: enabled.
 - Locale: `en-GB`.
 - Timezone: `UTC`.
 - JavaScript: disabled.
-- Screenshot: exactly the viewport; do not use full-page capture for judging.
+- Judge screenshot: full document height at the configured viewport width, capped at 12,000 pixels.
+- Preview screenshot: exactly the configured viewport (`1280 × 1200` pixels).
 
-The content must be concise enough that the project identity, rules summary, and leading gallery entries can all be understood in the first viewport. Footer content may fall below it, but the leaderboard must not be entirely below the fold.
+The baseline content is concise enough for the project identity, rules summary, and leading gallery entries to be understood in the first viewport. This is a content design target, not a candidate validation rule; contestant CSS may move, clip, hide, or otherwise transform any content, and judges assess the result in context.
 
 ## Public page and candidate render relationship
 
@@ -33,7 +34,7 @@ Use the same DOM template for both modes:
 - Uses a candidate's `submission.css`.
 - Uses the previous generation's leaderboard data.
 - Generation 1 uses `seed-generation.json` and system-owned seed thumbnails.
-- Produces the immutable screenshot passed to judges.
+- Produces immutable `screenshot.png` at the configured width and full document height (capped at 12,000 pixels), plus `screenshot-viewport.png` at the fixed viewport dimensions. Judges receive the full-height image; gallery cards and cohort contact sheets use the viewport image.
 
 ### Public generation page
 
@@ -154,7 +155,7 @@ The implementation must use this structure and naming. Additional nested wrapper
             <article class="entry-card">
               <header class="entry-header">...</header>
               <figure class="entry-visual">
-                <img class="entry-thumbnail" alt="..." width="1440" height="1200">
+                <img class="entry-thumbnail" alt="..." width="1280" height="1200">
                 <figcaption class="entry-caption">...</figcaption>
               </figure>
               <dl class="entry-scores">...</dl>
@@ -206,11 +207,9 @@ The contestant must produce exactly one file named `submission.css`.
 - `url(...)` except allowlisted challenge-owned local font URLs already documented in `starter.css`
 - Data URLs
 - Network requests
-- CSS intended to hide, replace, or falsify contestant names, scores, rules, or judge content
-- Content that impersonates a system error or changes the meaning of supplied text
 - Browser extensions or user stylesheets
 
-Generated decorative text through `content:` is allowed, but it must not contradict or obscure supplied content.
+CSS may hide, clip, move, cover, or otherwise transform supplied content. Judges evaluate the result in context, including what remains readable or available, and may penalise choices that weaken the design. These choices do not fail deterministic validation.
 
 ## Fonts
 
@@ -228,7 +227,7 @@ The exact files and `font-family` names must be listed in `challenge/fonts/READM
 
 Generation 1 requires a populated gallery to make the page representative. Include six neutral, system-owned seed thumbnails and use exactly as many seed entries as the configured season roster contains. They should:
 
-- have the same `1440:1200` aspect ratio as real candidate screenshots;
+- have the same configured viewport aspect ratio as fixed viewport candidate previews;
 - be visually quiet grayscale or muted compositions;
 - contain no brand names or design direction likely to anchor contestants;
 - be generated once and checked into the repository; and
@@ -250,18 +249,14 @@ Before rendering, validate all of the following:
 - the canonical challenge template and resolved snapshot hashes have not changed;
 - no unexpected files are collected as part of the submission.
 
-After rendering, validate:
+After rendering, validate only technical prerequisites for a usable capture:
 
 - document loaded successfully;
 - challenge fonts finished loading;
 - no network request escaped the local challenge origin;
-- no horizontal overflow exceeds two CSS pixels;
-- masthead, rules, and leaderboard have non-zero visible bounding boxes;
-- at least the first three leaderboard cards intersect the viewport when the cohort has three or more entries;
-- no required section is `display:none`, `visibility:hidden`, or fully transparent;
-- screenshot exists and has exact pixel dimensions `1440 × 1200`.
+- full-height judge screenshot is a PNG at the configured width, no taller than 12,000 pixels, and the viewport preview is a PNG at exactly `1280 × 1200` pixels.
 
-Do not reject a design merely because some lower-page content falls below the viewport. Record relevant warnings in `validation.json` and let judges account for composition.
+Overflow, clipping, off-page content, visibility, and paint effects are design choices for judges to assess from the full-height screenshot. The fixed viewport preview is for thumbnails only. They must not invalidate a candidate or prevent a capture. A genuine browser or screenshot failure remains `render_failed`.
 
 ## Starter stylesheet
 

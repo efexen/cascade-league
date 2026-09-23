@@ -35,14 +35,14 @@ You may read both files. Do not modify the HTML or any challenge asset. Do not c
 ## Fixed judging environment
 
 - Chromium
-- Desktop viewport: 1440 × 1200 CSS pixels
+- Desktop viewport: 1280 × 1200 CSS pixels for the current season configuration
 - Device scale factor: 1
 - JavaScript disabled
 - Reduced-motion preference enabled
 - Local challenge fonts only
-- The submitted page is captured exactly at the viewport, not as a full-page screenshot
+- The judge receives a full-height screenshot at the configured width, capped at 12,000 pixels. A separate exact viewport-sized image is used for previews and cohort thumbnails.
 
-The masthead, project explanation, rules, and leading leaderboard entries should be understandable within that canvas.
+The contestant may use any CSS presentation. Judges assess readability, information access, first-viewport composition, and off-page or clipped content in context from the full-height screenshot.
 
 ## Submission rules
 
@@ -50,8 +50,9 @@ The masthead, project explanation, rules, and leading leaderboard entries should
 - Maximum file size: 60 KiB.
 - Do not use `@import`.
 - Do not use remote URLs, data URLs, external fonts, external images, or contestant-provided assets.
-- Do not hide, falsify, replace, or contradict supplied rules, contestant identities, scores, or judge content.
-- CSS pseudo-elements and decorative generated content are allowed when they do not change the meaning of supplied content.
+- Do not falsify or contradict supplied rules, identities, scores, or judge content, or add content that changes their meaning.
+- Hidden, clipped, covered, and off-page content are allowed. Judges assess their effects in context.
+- CSS pseudo-elements and decorative generated content are allowed.
 - Use only the supplied semantic HTML and styling hooks.
 - Do not write an explanation instead of the file.
 
@@ -103,8 +104,8 @@ Evaluate one candidate page. You do not know which model or harness produced it.
 
 You have received:
 
-1. `candidate.png`: the candidate at 1440 × 1200 CSS pixels;
-2. `cohort.png`: lower-detail anonymous thumbnails of every candidate, used only to assess relative originality; and
+1. `candidate.png`: the candidate at the configured width and full document height, capped at 12,000 pixels;
+2. `cohort.png`: lower-detail anonymous fixed-viewport previews of every candidate, used only to assess relative originality; and
 3. `candidate.css`: the candidate's CSS with comments removed.
 
 The page explains the tournament, states its rules, and presents a leaderboard gallery. JavaScript, HTML changes, remote resources, and contestant-supplied assets are prohibited. Deterministic validation has already checked basic compliance; you should still judge how intelligently the candidate handles the constraint.
@@ -115,11 +116,11 @@ Score integers only.
 
 ### hierarchyAndReadability — 0 to 15
 
-Can a viewer quickly understand the project, rules, leaderboard, and scores? Reward clarity without requiring conventional styling.
+Can a viewer understand the project, rules, leaderboard, and scores from what the design makes available? Assess readability, information access, first-viewport composition, and off-page or clipped content in context. Reward intentional experiments; penalise choices that make important information hard to access. Do not automatically assign zero because content is hidden, clipped, covered, or outside the viewport.
 
 ### composition — 0 to 15
 
-Judge use of the fixed canvas, spacing, balance, rhythm, density, and relationship between explanation and gallery.
+Judge use of the fixed canvas, spacing, balance, rhythm, density, first-viewport composition, and relationship between explanation and gallery. Consider clipped and off-page content contextually: it may support an intentional design, or weaken access and balance.
 
 ### typography — 0 to 15
 
@@ -242,4 +243,3 @@ Do not attach separate competitor screenshots or competitor CSS.
 - The orchestrator may parse a JSON object from an adapter-owned output file. It may not ask the model to repair the response.
 - The orchestrator recalculates totals and rejects mismatches.
 - Preserve invalid raw outputs privately for diagnosis.
-

@@ -44,7 +44,7 @@ const STATIC_COPY: GalleryStaticCopy = GalleryStaticCopySchema.parse({
     "Later generations learn from standings and critique.",
   ],
   method:
-    "Each entry is rendered in bundled Chromium at a 1280 × 1200 CSS-pixel viewport with JavaScript disabled and local fonts only. Judges receive a full-height capture up to 12,000 pixels, so designs may use intentional vertical composition. Anonymous judges score seven dimensions out of 100; the combined score is the arithmetic mean of valid judge scores, while originality remains visible as its own dimension.",
+    "Each entry is rendered in bundled Chromium with JavaScript disabled and local fonts only. Judges receive a full-height screenshot at the configured width, capped at 12,000 pixels; fixed viewport images are used for previews. Judges assess readability, information access, composition, and off-page content in context. Anonymous judges score seven dimensions out of 100; the combined score is the arithmetic mean of valid judge scores, while originality remains visible as its own dimension.",
   statusLabels: {
     seed: "Seed entry",
     valid: "Valid",

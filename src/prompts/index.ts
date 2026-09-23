@@ -38,9 +38,7 @@ You may read both files. Do not modify the HTML or any challenge asset. Do not c
 - JavaScript disabled
 - Reduced-motion preference enabled
 - Local challenge fonts only
-- The submitted page is captured at its full document height, up to 12,000 pixels, while the 1280-pixel viewport width remains fixed
-
-You may use the page vertically. Required sections and leaderboard entries do not need to fit within the first viewport, provided the complete page remains readable and intentional.
+- The judge screenshot captures the full document height, capped at 12,000 pixels; its width stays at 1280 pixels. A separate 1280 × 1200 viewport image is used for previews and cohort thumbnails.
 
 ## Submission rules
 
@@ -48,8 +46,8 @@ You may use the page vertically. Required sections and leaderboard entries do no
 - Maximum file size: 60 KiB.
 - Do not use __BACKTICK__@import__BACKTICK__.
 - Do not use remote URLs, data URLs, external fonts, external images, or contestant-provided assets.
-- Do not hide, falsify, replace, or contradict supplied rules, contestant identities, scores, or judge content.
-- CSS pseudo-elements and decorative generated content are allowed when they do not change the meaning of supplied content.
+- Do not falsify or contradict supplied rules, identities, scores, or judge content, or add content that changes their meaning.
+- CSS pseudo-elements, masks, clipping, overlays, hidden sections, and off-page layouts are allowed. Judges will assess their effect on readability, information access, composition, and the overall design in context.
 - Use only the supplied semantic HTML and styling hooks.
 - Do not write an explanation instead of the file.
 
@@ -67,7 +65,7 @@ The jury scores the rendered design out of 100:
 
 Originality is explicitly important and will be judged relative to the current cohort. Choose a coherent point of view; readability and intentionality still matter.
 
-The jury will see your full-resolution screenshot, a lower-detail contact sheet of the cohort, and your CSS with comments removed. It will not know your model or harness identity.
+The jury will see your full-height screenshot, a lower-detail cohort contact sheet made from fixed viewport previews, and your CSS with comments removed. It will not know your model or harness identity.
 
 Finish by ensuring __BACKTICK__[SUBMISSION_PATH]__BACKTICK__ exists. Do not attempt to run or inspect the result.
 `;
@@ -106,8 +104,8 @@ Evaluate one candidate page. You do not know which model or harness produced it.
 
 You have received:
 
-1. __BACKTICK__candidate.png__BACKTICK__: the candidate's full page at a fixed 1280 CSS-pixel viewport width, captured to its document height up to 12,000 pixels;
-2. __BACKTICK__cohort.png__BACKTICK__: lower-detail anonymous thumbnails of every candidate, used only to assess relative originality; and
+1. __BACKTICK__candidate.png__BACKTICK__: the candidate at 1280 CSS pixels wide and full document height, capped at 12,000 pixels;
+2. __BACKTICK__cohort.png__BACKTICK__: lower-detail anonymous fixed-viewport previews of every candidate, used only to assess relative originality; and
 3. __BACKTICK__candidate.css__BACKTICK__: the candidate's CSS with comments removed.
 
 The page explains the tournament, states its rules, and presents a leaderboard gallery. JavaScript, HTML changes, remote resources, and contestant-supplied assets are prohibited. Deterministic validation has already checked basic compliance; you should still judge how intelligently the candidate handles the constraint.
@@ -118,11 +116,11 @@ Score integers only.
 
 ### hierarchyAndReadability — 0 to 15
 
-Can a viewer quickly understand the project, rules, leaderboard, and scores? Reward clarity without requiring conventional styling.
+Can a viewer understand the project, rules, leaderboard, and scores from what the design makes available? Assess readability, information access, first-viewport composition, and off-page or clipped content in context. Reward intentional experiments, and penalise choices that make important information hard to access. Do not automatically assign zero because content is hidden, covered, clipped, or outside the viewport.
 
 ### composition — 0 to 15
 
-Judge use of the full page, spacing, balance, rhythm, density, vertical pacing, and relationship between explanation and gallery. Do not penalise content merely for appearing below the first viewport.
+Judge use of the fixed-width canvas, spacing, balance, rhythm, density, and relationship between explanation and gallery across the full-height screenshot. Consider clipped and off-page content in context: it may support an intentional composition or weaken access and balance.
 
 ### typography — 0 to 15
 

@@ -27,7 +27,7 @@ starterCss: starter.css
 fallbackCss: fallback.css
 seedData: seed/seed-generation.json
 viewport:
-  width: 1440
+  width: 1280
   height: 1200
   deviceScaleFactor: 1
 browser:
@@ -337,10 +337,9 @@ Allowed run statuses:
   ],
   "renderChecks": [
     {
-      "code": "horizontal_overflow",
+      "code": "document_loaded",
       "status": "passed",
-      "value": 0,
-      "message": "No horizontal overflow"
+      "message": "Challenge document loaded"
     }
   ],
   "errors": [],

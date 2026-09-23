@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -23,6 +25,13 @@ describe("contestant prompt contract", () => {
     expect(first).not.toContain("Local Maxima");
     expect(first).toContain("Originality is explicitly important");
     expect(first).toContain("judged relative to the current cohort");
+    expect(first).toContain("hidden sections");
+    expect(first).toContain("full document height, capped at 12,000 pixels");
+    expect(first).toContain(
+      "viewport image is used for previews and cohort thumbnails",
+    );
+    expect(first).toContain("Do not falsify or contradict supplied rules");
+    expect(first).toContain("hidden sections");
     expect(first).not.toMatch(
       /gradients|glass|glows|rounded cards|oversized sans|monospace metadata|editorial serifs|brutalist|terminal styling/iu,
     );
@@ -59,6 +68,11 @@ describe("contestant prompt contract", () => {
       /gradients|glass|glows|rounded cards|oversized sans|monospace metadata|editorial serifs|brutalist|terminal/iu,
     );
     expect(candidatePrompt).toContain("anonymous design judge for Cascade League");
+    expect(candidatePrompt).toContain("full document height, capped at 12,000 pixels");
+    expect(candidatePrompt).toContain("fixed-viewport previews of every candidate");
+    expect(candidatePrompt).toContain("first-viewport composition");
+    expect(candidatePrompt).toContain("Do not automatically assign zero");
+    expect(candidatePrompt).toContain("information hard to access");
     expect(candidatePrompt).not.toContain("Local Maxima");
     expect(candidatePrompt).not.toContain("modelUsage");
     expect(candidatePrompt).toContain("no more than 420 characters");
@@ -71,5 +85,26 @@ describe("contestant prompt contract", () => {
     expect(awardsPrompt).not.toContain("Local Maxima");
     expect(awardsPrompt).not.toContain("fixture-editorial");
     expect(awardsPrompt).not.toContain("[SUMMARIES]");
+  });
+
+  it("keeps the checked-in contestant and judge prompt templates aligned", () => {
+    const contestantTemplate = readFileSync(
+      new URL("../../prompts/contestant-generation-1.md.hbs", import.meta.url),
+      "utf8",
+    );
+    const judgeTemplate = readFileSync(
+      new URL("../../prompts/judge-candidate.md.hbs", import.meta.url),
+      "utf8",
+    );
+
+    expect(contestantTemplate).toMatch(
+      /full-height\s+screenshot at 1280 pixels wide, capped at 12,000 pixels/u,
+    );
+    expect(contestantTemplate).toContain("A fixed viewport image is used");
+    expect(contestantTemplate).toContain("Do not falsify or contradict supplied rules");
+    expect(judgeTemplate).toContain(
+      "configured width and full document height, capped at 12,000 pixels",
+    );
+    expect(judgeTemplate).toContain("fixed-viewport previews of every candidate");
   });
 });

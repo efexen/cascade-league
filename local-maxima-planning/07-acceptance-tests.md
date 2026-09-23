@@ -67,6 +67,7 @@ Phase 1 is not complete until every required automated test passes and the manua
 - Judge prompts include the rubric and exact response schema.
 - CSS comments do not appear in judge input.
 - Awards prompts contain only anonymous IDs.
+- Judge prompts ask for contextual assessment of readability, information access, first-viewport composition, and clipped or off-page content, without automatically zeroing unusual visibility choices.
 
 ## Integration tests
 
@@ -97,7 +98,7 @@ The test must prove:
 
 - all contestants run once;
 - all submissions validate;
-- all screenshots are exactly 1440 × 1200 pixels;
+- all candidate judge screenshots are full document height at the configured width (capped at 12,000 pixels), and fixed viewport previews are exactly 1280 × 1200 pixels;
 - each judge evaluates candidates in stored random order;
 - every candidate has two valid critiques;
 - every judge emits zero to three awards;
@@ -105,7 +106,7 @@ The test must prove:
 - the gallery uses that candidate's exact CSS bytes as `champion.css`;
 - the public page includes every contestant, judge score, critique, and award;
 - the public page loads with JavaScript disabled and external network blocked; and
-- `gallery-screenshot.png` exists at exactly 1440 × 1200 pixels.
+- `gallery-screenshot.png` exists at exactly the configured 1280 × 1200 viewport dimensions.
 
 ### Mixed-failure tournament
 
@@ -179,7 +180,7 @@ Verify they are rendered as text, not executable markup, and CSP blocks scripts.
 
 ### Browser network isolation
 
-Use CSS and content fixtures that attempt external requests. Verify Playwright records and aborts them and the candidate fails or warns according to the contract.
+Use CSS and content fixtures that attempt external requests. Verify Playwright records and aborts them and the candidate is marked `render_failed`; overflow, hidden sections, clipping, and paint experiments must still produce full-height judge captures plus fixed viewport previews and remain judgeable.
 
 ## Visual fixture tests
 
@@ -187,7 +188,7 @@ Check in one reference screenshot produced by a simple deterministic fixture sty
 
 On the supported M4/macOS environment:
 
-- exact dimensions must match;
+- the full-height candidate capture and fixed viewport preview dimensions must match their documented bounds;
 - a small pixel-difference threshold may account for documented font rasterisation variation;
 - major layout differences fail; and
 - browser, font, or Playwright upgrades require explicit reference review.
@@ -248,7 +249,7 @@ Phase 1 is done only when all statements are true:
 - Judges can create free-form awards that do not affect numeric ranking.
 - Aggregation is deterministic and contains no model call.
 - The champion CSS styles the current static gallery.
-- The completed gallery has a standard 1440 × 1200 shareable screenshot.
+- The completed gallery has a shareable screenshot at the configured viewport dimensions.
 - The public page contains rules, description, leaderboard, thumbnails, scores, critiques, awards, and methodology.
 - The public page uses no JavaScript or remote resource.
 - Resume never reruns a terminal contestant attempt.

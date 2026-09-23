@@ -14,7 +14,7 @@ Local Maxima is a recurring CSS design tournament in which each contestant is a 
 - Treat each `harness + model + configuration` combination as a distinct contestant.
 - Begin with a one-shot track only. A contestant gets one execution attempt and no rendered preview or screenshot feedback.
 - Use one desktop target, not desktop and mobile simultaneously.
-- Standardize the judged viewport at `1440 × 1200` CSS pixels with device scale factor `1`.
+- Use the configured `1280 × 1200` CSS-pixel viewport with device scale factor `1`; judges receive a full-height capture capped at 12,000 pixels, while thumbnails use a fixed viewport preview.
 - The challenge page is also the project explanation, rules page, current leaderboard, and screenshot gallery.
 - Contestants may not modify HTML or use JavaScript.
 - Contestants receive the scoring rubric, including the importance of originality.

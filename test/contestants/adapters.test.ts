@@ -96,12 +96,12 @@ describe("fixture contestant adapter", () => {
     },
   );
 
-  it("includes the deterministic render-failure fixture stylesheet", async () => {
-    const root = await createTestTempRoot("local-maxima-fixture-render-failure-");
+  it("includes the deterministic overflow-experiment fixture stylesheet", async () => {
+    const root = await createTestTempRoot("local-maxima-fixture-overflow-");
     const input = fixtureInput(join(root, "workspace"));
     const contestant = {
       ...input.contestant,
-      harness: { ...input.contestant.harness, fixture: "render-failure" },
+      harness: { ...input.contestant.harness, fixture: "overflow" },
     };
 
     const result = await new FixtureContestantAdapter({

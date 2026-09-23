@@ -209,8 +209,8 @@ For each valid candidate:
 4. navigate to the local challenge page;
 5. wait for `document.fonts.ready` through a browser-side evaluation that does not enable page JavaScript;
 6. wait one additional deterministic render tick;
-7. run post-render checks;
-8. capture `screenshot.png`; and
+7. confirm browser and local-font readiness;
+8. capture a full-height `screenshot.png` at the configured width, capped at 12,000 pixels, plus an exact viewport-sized `screenshot-viewport.png`; and
 9. close the context.
 
 The browser may be shared across candidates, but the context may not.
@@ -267,7 +267,7 @@ public/
 
 The output must work when served statically with JavaScript disabled and external network access blocked.
 
-After building the public page, render it once at the same `1440 × 1200` desktop settings and save `gallery-screenshot.png`. This is the standard shareable generation image. It is derived output and is never used to judge that same generation.
+After building the public page, render it once at the configured `1280 × 1200` desktop settings and save `gallery-screenshot.png`. This is the standard shareable generation image. It is derived output and is never used to judge that same generation.
 
 ## Isolation and security
 

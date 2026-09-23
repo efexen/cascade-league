@@ -17,7 +17,7 @@ The operator must be able to run a fixture tournament from a fresh checkout and 
 - emergent awards;
 - an aggregated leaderboard;
 - a static public gallery styled with the champion CSS; and
-- a `1440 × 1200` screenshot of that completed gallery for sharing.
+- a screenshot of that completed gallery at the configured viewport dimensions for sharing.
 
 The same pipeline must accept real command-based contestant and judge harnesses through configuration without changing orchestration code.
 
@@ -111,8 +111,8 @@ Do not rely on regular expressions alone for CSS parsing.
 - Disable JavaScript.
 - Abort non-loopback network requests.
 - Wait for local fonts.
-- Execute post-render visibility and overflow checks.
-- Capture exactly `1440 × 1200` PNG.
+- Confirm document, local-font, and network readiness after navigation.
+- Capture a full-height judge PNG at the configured width, capped at 12,000 pixels, and a separate exact viewport-sized PNG for previews. Do not reject or block capture for overflow, clipping, off-page placement, hidden content, or paint effects.
 - Record Chromium and Playwright versions.
 - Close every browser context even after failure.
 
@@ -166,7 +166,7 @@ Add unit tests for ties, missing judges, invalid candidates, and deterministic o
 - Add a CSP denying scripts and remote resources.
 - Ensure the page works with JavaScript disabled and network blocked.
 - Ensure every candidate card shows rank or failure state, screenshot, scores, critique, and awards.
-- Render the completed public page at `1440 × 1200` and save `gallery-screenshot.png`.
+- Render the completed public page at the configured `1280 × 1200` viewport and save `gallery-screenshot.png`.
 
 The gallery should inherit its visual layout from champion CSS; do not add a competing application stylesheet. A very small system-owned emergency stylesheet may appear only on explicit failure pages.
 
