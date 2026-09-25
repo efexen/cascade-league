@@ -79,6 +79,30 @@
     {
       "path": "test/fixtures/reference/gallery-screenshot.png",
       "sha256": "2d57bcc4283ed4eb17435ebc30bae9686d131af74af5750e111a52adb412ae69"
+    },
+    {
+      "path": "challenge/season-004/seed/thumbnails/seed-01.png",
+      "sha256": "43345c9e0dda0271be7622e4ddf4657df9e96fbee43eca28b3ab99e810f8124e"
+    },
+    {
+      "path": "challenge/season-004/seed/thumbnails/seed-02.png",
+      "sha256": "e736fdc6f4535fac6e25bd000d4d48e23cd485b5a6e4859379a7f79b8dd63cc9"
+    },
+    {
+      "path": "challenge/season-004/seed/thumbnails/seed-03.png",
+      "sha256": "94dd134785ae8d2bf955d06be589687df8649c48333af3184954e514105b8782"
+    },
+    {
+      "path": "challenge/season-004/seed/thumbnails/seed-04.png",
+      "sha256": "5d39c997497c894010223e3a6d4fdf08979ec193a0b75acee768b579ea725667"
+    },
+    {
+      "path": "challenge/season-004/seed/thumbnails/seed-05.png",
+      "sha256": "0eb1ec3eb8563975dc165bcec816dd141accf6004d6e4515fe79c3d32915491b"
+    },
+    {
+      "path": "challenge/season-004/seed/thumbnails/seed-06.png",
+      "sha256": "04345e1a09f5ab33fe13952586241403b0676f0a8a52f22a9b33fdd7b464a0ca"
     }
   ]
 }

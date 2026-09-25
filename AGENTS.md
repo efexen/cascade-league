@@ -2,9 +2,9 @@
 
 ## Source of truth
 
-Read `local-maxima-planning/README.md`, then all eight linked documents in the exact order listed there. The packet is authoritative. Implement only Phase 0/1 and do not broaden scope.
+The `local-maxima-planning/` packet is historical planning context, not current product authority. For new-season work, follow the explicit user request and the current runbook; preserve the engineering workflow, safety constraints, and verification requirements below. Do not broaden the requested scope.
 
-If documents conflict or a requirement cannot be satisfied, stop and report the conflict explicitly rather than silently choosing a different contract.
+If current requirements conflict or a requirement cannot be satisfied, stop and report the conflict explicitly rather than silently choosing a different contract. Historical packet wording does not override an explicit current user request.
 
 ## Engineering workflow
 

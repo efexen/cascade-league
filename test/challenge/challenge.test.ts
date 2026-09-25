@@ -12,6 +12,98 @@ import {
 import { JudgeMatrixSchema } from "../../src/challenge/data.js";
 
 const seasonRoot = new URL("../../challenge/season-001/", import.meta.url);
+const season004Root = new URL("../../challenge/season-004/", import.meta.url);
+
+describe("Season 4 challenge", () => {
+  it("freezes the selected semantic order, hooks, and 2-to-6 entry rendering", async () => {
+    const definition = await loadSeasonDefinition(season004Root.pathname);
+    expect(definition.config.seasonId).toBe("0004");
+    expect(definition.config.challengeVersion).toBe("4.0.0");
+    expect(definition.config.viewport).toEqual({
+      width: 1280,
+      height: 1200,
+      deviceScaleFactor: 1,
+    });
+
+    for (const rosterSize of [2, 6]) {
+      const page = await buildSeedChallengePage({
+        definition,
+        generationId: "0001",
+        rosterSize,
+        judgeCount: 2,
+        stylesheetPath: "submission.css",
+        generatedAt: "2026-09-25T00:00:00.000Z",
+      });
+      const report = await new HtmlValidate({
+        extends: ["html-validate:recommended"],
+        rules: { "void-style": "off" },
+      }).validateString(page.html, "season-004-challenge.html");
+      expect(report.results.flatMap((result) => result.messages)).toEqual([]);
+      const browser = await chromium.launch();
+      try {
+        const browserPage = await browser.newPage({ javaScriptEnabled: false });
+        await browserPage.setContent(page.html, { waitUntil: "domcontentloaded" });
+        const structure = await browserPage.evaluate(() => ({
+          order: Array.from(
+            document.querySelectorAll("main > section"),
+            (section) => section.id,
+          ),
+          hooks: [
+            "#masthead",
+            "#introduction",
+            "#leaderboard",
+            "#rules",
+            ".entry-card",
+            "#awards",
+            "#method",
+            "#judge-notes",
+            "#site-footer",
+          ].map((selector) => document.querySelectorAll(selector).length),
+          entries: document.querySelectorAll(".entry-card").length,
+          imageDimensions: Array.from(
+            document.querySelectorAll<HTMLImageElement>(".entry-thumbnail"),
+            ({ width, height }) => [width, height],
+          ),
+          scriptCount: document.querySelectorAll("script").length,
+          remoteResources: Array.from(
+            document.querySelectorAll<HTMLImageElement | HTMLLinkElement>(
+              "img[src], link[href]",
+            ),
+          )
+            .map((resource) =>
+              resource instanceof HTMLImageElement ? resource.src : resource.href,
+            )
+            .filter((url) => /^https?:/u.test(url)),
+        }));
+        expect(structure.order).toEqual([
+          "introduction",
+          "leaderboard",
+          "rules",
+          "awards",
+          "method",
+          "judge-notes",
+        ]);
+        expect(structure.hooks).toEqual([1, 1, 1, 1, rosterSize, 1, 1, 1, 1]);
+        expect(structure.entries).toBe(rosterSize);
+        expect(structure.imageDimensions).toEqual(
+          Array.from({ length: rosterSize }, () => [1280, 1200]),
+        );
+        expect(structure.scriptCount).toBe(0);
+        expect(structure.remoteResources).toEqual([]);
+        expect(page.html).toMatch(/arithmetic mean of valid\s+judge scores/u);
+        expect(page.html).toMatch(/originality and\s+memorability\s+\(20\)/u);
+      } finally {
+        await browser.close();
+      }
+    }
+    expect(await readFile(`${season004Root.pathname}/fonts/README.md`, "utf8")).toMatch(
+      /SIL Open Font License 1\.1/u,
+    );
+    expect(await readFile("assets/first-party-images.json", "utf8")).toContain(
+      "MIT License",
+    );
+  });
+});
 
 describe("Season 1 challenge", () => {
   it("passes offline semantic HTML validation", async () => {

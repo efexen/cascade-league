@@ -152,7 +152,7 @@ gallery by itself. Prefer `run-generation` for a complete cycle.
 | Generations root | Directory containing `0001/`, `0002/`, etc.; not automatically partitioned by season.      |
 
 CLI season `001` maps to ID `0001` and `challenge/season-001/`. Checked-in
-seasons `001`, `002`, and `003` exist. Passing `--season 004` does not create its
+seasons `001`, `002`, `003`, and `004` exist. Passing `--season 005` does not create its
 source files. The next generation ID is allocated across directories in the
 chosen root. Generation `0002` requires completed `0001` in that same root,
 with the same season and enabled contestant IDs **in the same order**.

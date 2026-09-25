@@ -17,7 +17,7 @@ interface ProvenanceManifest {
 }
 
 const expectedPaths = [
-  ...["001", "002", "003"].flatMap((season) =>
+  ...["001", "002", "003", "004"].flatMap((season) =>
     ["01", "02", "03", "04", "05", "06"].map(
       (seed) => `challenge/season-${season}/seed/thumbnails/seed-${seed}.png`,
     ),
