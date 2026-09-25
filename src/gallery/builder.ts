@@ -59,6 +59,21 @@ const PublicMetadataEntrySchema = z
   })
   .strict();
 
+const PublicGuidanceDisclosureSchema = z
+  .object({
+    experiment: z.string().min(1),
+    entries: z.array(
+      z
+        .object({
+          displayName: z.string().min(1),
+          label: z.string().min(1),
+          content: z.string().optional(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+
 export const PublicMetadataSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -75,6 +90,7 @@ export const PublicMetadataSchema = z
     championReason: z.string().min(1),
     expectedJudgeCount: z.number().int().nonnegative(),
     entries: z.array(PublicMetadataEntrySchema),
+    designGuidance: PublicGuidanceDisclosureSchema.optional(),
   })
   .strict();
 
@@ -135,6 +151,25 @@ function statusLabel(
   return labels[status];
 }
 
+function matchedGuidancePair(config: z.infer<typeof ContestantsConfigSchema>): boolean {
+  if (config.contestants.length !== 2) return false;
+  const [first, second] = config.contestants;
+  if (first === undefined || second === undefined) return false;
+  if ((first.designGuidance === undefined) === (second.designGuidance === undefined)) {
+    return false;
+  }
+  const effectiveBudget = (contestant: typeof first) =>
+    contestant.budget ?? {
+      timeoutMs: config.defaults.timeoutMs,
+      maximumTotalTokens: config.defaults.maximumTotalTokens,
+    };
+  return (
+    isDeepStrictEqual(first.harness, second.harness) &&
+    isDeepStrictEqual(first.model, second.model) &&
+    isDeepStrictEqual(effectiveBudget(first), effectiveBudget(second))
+  );
+}
+
 function scoreLabel(score: number | null): string {
   return score === null ? "—" : score.toFixed(2);
 }
@@ -186,6 +221,7 @@ export function renderDesignViewer(
   generationId: string,
   entry: ViewerEntry,
   entries: readonly ViewerEntry[],
+  hasGuidance = false,
 ): string {
   const index = entries.findIndex(
     (candidate) => candidate.contestantId === entry.contestantId,
@@ -220,7 +256,7 @@ export function renderDesignViewer(
     <meta name="referrer" content="no-referrer">
     <title>${label} · Season ${seasonId}, Generation ${generationId}</title>
     <style>
-      *{box-sizing:border-box}html,body{width:100%;height:100%;margin:0}body{overflow:hidden;background:#11120f;color:#f1f2e9;font:14px/1.4 system-ui,sans-serif}.viewer{display:flex;flex-direction:column;width:100%;height:100vh;height:100dvh;min-height:0}.bar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:.5rem 1.25rem;padding:.65rem 1rem;background:#11120f;border-bottom:1px solid #45483b}.identity{min-width:0}.eyebrow{margin:0;color:#c1c5b4;font-size:.75rem;letter-spacing:.04em}.identity h1{overflow-wrap:anywhere;margin:.1rem 0 0;font-size:1rem;line-height:1.25}.result{margin:.12rem 0 0;color:#dfff39;font-size:.8rem}.controls{display:flex;align-items:center;justify-content:flex-end;gap:.75rem}.controls a,.controls summary,.context a{color:#dfff39;text-underline-offset:.2em}.entry-nav{display:flex;gap:.75rem}.entry-nav span{color:#818575}.switcher{position:relative}.switcher summary{cursor:pointer;white-space:nowrap}.switcher ul{position:absolute;z-index:2;top:calc(100% + .5rem);right:0;width:min(24rem,calc(100vw - 2rem));max-height:min(60vh,28rem);overflow:auto;margin:0;padding:.5rem;background:#20221c;border:1px solid #636752;list-style:none}.switcher li+li{border-top:1px solid #45483b}.switcher li a{display:block;padding:.55rem .65rem;overflow-wrap:anywhere}.context{display:flex;align-items:center;gap:.8rem;padding:.3rem 1rem;background:#24261e;color:#d5d8c9;font-size:.75rem}.context p{margin:0}.gallery-link{flex:none}.design-frame{display:block;flex:1 1 auto;width:100%;min-height:0;border:0;background:#fff}@media(max-width:600px){.bar{grid-template-columns:minmax(0,1fr);gap:.55rem;padding:.55rem .75rem}.controls{justify-content:space-between;flex-wrap:wrap}.entry-nav{flex:1;justify-content:space-between;gap:.35rem}.controls a,.controls summary{font-size:.82rem}.context{align-items:flex-start;padding:.4rem .75rem}.design-frame{min-height:0}}
+      *{box-sizing:border-box}html,body{width:100%;height:100%;margin:0}body{overflow:hidden;background:#11120f;color:#f1f2e9;font:14px/1.4 system-ui,sans-serif}.viewer{display:flex;flex-direction:column;width:100%;height:100vh;height:100dvh;min-height:0}.bar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:.5rem 1.25rem;padding:.65rem 1rem;background:#11120f;border-bottom:1px solid #45483b}.identity{min-width:0}.eyebrow{margin:0;color:#c1c5b4;font-size:.75rem;letter-spacing:.04em}.identity h1{overflow-wrap:anywhere;margin:.1rem 0 0;font-size:1rem;line-height:1.25}.result{margin:.12rem 0 0;color:#dfff39;font-size:.8rem}.controls{display:flex;align-items:center;justify-content:flex-end;gap:.75rem}.controls a,.controls summary,.context a{color:#dfff39;text-underline-offset:.2em}.entry-nav{display:flex;gap:.75rem}.entry-nav span{color:#818575}.switcher{position:relative}.switcher summary{cursor:pointer;white-space:nowrap}.switcher ul{position:absolute;z-index:2;top:calc(100% + .5rem);right:0;width:min(24rem,calc(100vw - 2rem));max-height:min(60vh,28rem);overflow:auto;margin:0;padding:.5rem;background:#20221c;border:1px solid #636752;list-style:none}.switcher li+li{border-top:1px solid #45483b}.switcher li a{display:block;padding:.55rem .65rem;overflow-wrap:anywhere}.context{display:flex;align-items:center;gap:.8rem;padding:.3rem 1rem;background:#24261e;color:#d5d8c9;font-size:.75rem}.context p{margin:0}${hasGuidance ? ".context{flex-wrap:wrap;gap:.35rem .8rem}.context p{flex:1 0 100%;order:1}" : ""}.gallery-link{flex:none}.design-frame{display:block;flex:1 1 auto;width:100%;min-height:0;border:0;background:#fff}@media(max-width:600px){.bar{grid-template-columns:minmax(0,1fr);gap:.55rem;padding:.55rem .75rem}.controls{justify-content:space-between;flex-wrap:wrap}.entry-nav{flex:1;justify-content:space-between;gap:.35rem}.controls a,.controls summary{font-size:.82rem}.context{align-items:flex-start;padding:.4rem .75rem}.design-frame{min-height:0}}
     </style>
   </head>
   <body>
@@ -243,7 +279,7 @@ export function renderDesignViewer(
       </header>
       <div class="context">
         <a class="gallery-link" href="../../index.html">Back to gallery</a>
-        <p>The embedded design styles previous-generation standings. This bar identifies the current entry and result.</p>
+        ${hasGuidance ? '<a href="../../guidance.html">Contestant design guidance</a>\n        ' : ""}<p>The embedded design styles previous-generation standings. This bar identifies the current entry and result.</p>
         <a href="index.html">Raw design HTML</a>
         <a href="../../${escapeHtml(screenshotFile)}">Full-size screenshot</a>
       </div>
@@ -259,13 +295,45 @@ async function writeDesignViewers(
   seasonId: string,
   generationId: string,
   entries: readonly ViewerEntry[],
+  hasGuidance = false,
 ): Promise<void> {
   for (const entry of entries) {
     await writeTextAtomically(
       join(rootPath, publicViewerPath(entry.contestantId)),
-      renderDesignViewer(seasonId, generationId, entry, entries),
+      renderDesignViewer(seasonId, generationId, entry, entries, hasGuidance),
     );
   }
+}
+
+function renderGuidancePage(
+  guidance: z.infer<typeof PublicGuidanceDisclosureSchema>,
+): string {
+  const entries = guidance.entries
+    .map(
+      (entry) =>
+        `<section><h2>${escapeHtml(entry.displayName)}</h2><p><strong>${escapeHtml(entry.label)}</strong></p>${entry.content === undefined ? "" : `<pre>${escapeHtml(entry.content)}</pre>`}</section>`,
+    )
+    .join("\n");
+  return `<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+    <meta name="referrer" content="no-referrer">
+    <title>Contestant design guidance · Cascade League</title>
+    <style>body{max-width:54rem;margin:0 auto;padding:2rem 1.25rem;background:#11120f;color:#f1f2e9;font:1rem/1.6 system-ui,sans-serif}a{color:#dfff39}h1{line-height:1.1}section{margin:2rem 0;padding:1rem 0;border-top:1px solid #45483b}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}</style>
+  </head>
+  <body>
+    <main>
+      <p><a href="index.html">Back to gallery</a></p>
+      <h1>Guidance provided after judging</h1>
+      <p>${escapeHtml(guidance.experiment)}</p>
+      ${entries}
+    </main>
+  </body>
+</html>
+`;
 }
 
 async function assertRegularFile(path: string, description: string): Promise<void> {
@@ -445,6 +513,7 @@ async function verifyGenerationSources(
   readonly snapshot: z.infer<typeof SnapshotSchema>;
   readonly archive: z.infer<typeof GallerySourceArchiveSchema>;
   readonly challengeConfig: z.infer<typeof ChallengeConfigSchema>;
+  readonly contestantsConfig: z.infer<typeof ContestantsConfigSchema>;
   readonly judgesConfig: z.infer<typeof JudgesConfigSchema>;
 }> {
   const snapshot = await readJsonWithSchema(
@@ -495,6 +564,7 @@ async function verifyGenerationSources(
     judges: "config/judges.yaml",
   };
   let challengeConfig: z.infer<typeof ChallengeConfigSchema> | null = null;
+  let contestantsConfig: z.infer<typeof ContestantsConfigSchema> | null = null;
   let judgesConfig: z.infer<typeof JudgesConfigSchema> | null = null;
   for (const [name, relativePath] of Object.entries(configPaths) as [
     keyof z.infer<typeof ManifestSchema>["configHashes"],
@@ -509,12 +579,12 @@ async function verifyGenerationSources(
     if (name === "challenge") {
       challengeConfig = await readYamlWithSchema(configPath, ChallengeConfigSchema);
     } else if (name === "contestants") {
-      await readYamlWithSchema(configPath, ContestantsConfigSchema);
+      contestantsConfig = await readYamlWithSchema(configPath, ContestantsConfigSchema);
     } else {
       judgesConfig = await readYamlWithSchema(configPath, JudgesConfigSchema);
     }
   }
-  if (challengeConfig === null || judgesConfig === null) {
+  if (challengeConfig === null || contestantsConfig === null || judgesConfig === null) {
     throw new Error("generation config snapshots are incomplete");
   }
   if (!isDeepStrictEqual(archive.challengeConfig, challengeConfig)) {
@@ -529,7 +599,21 @@ async function verifyGenerationSources(
       );
     }
   }
-  return { snapshot, archive, challengeConfig, judgesConfig };
+  for (const contestant of contestantsConfig.contestants) {
+    if (contestant.designGuidance === undefined) continue;
+    const archiveRelativePath = `guidance/${contestant.id}.md`;
+    const expectedHash = snapshot.inputHashes[archiveRelativePath];
+    if (expectedHash === undefined)
+      throw new Error(`snapshot is missing ${archiveRelativePath}`);
+    const guidancePath = join(generationPath, archiveRelativePath);
+    await assertRegularFile(guidancePath, `generation ${archiveRelativePath}`);
+    if (sha256(await readFile(guidancePath)) !== expectedHash) {
+      throw new Error(
+        `generation ${archiveRelativePath} failed its snapshot hash check`,
+      );
+    }
+  }
+  return { snapshot, archive, challengeConfig, contestantsConfig, judgesConfig };
 }
 
 function expectedCandidateStatus(input: {
@@ -885,7 +969,7 @@ export async function buildGallery(
     throw new Error("leaderboard does not match the generation manifest");
   }
   await verifyLeaderboardArtifacts(generationPath, manifest, leaderboard);
-  const { snapshot, archive, challengeConfig, judgesConfig } =
+  const { snapshot, archive, challengeConfig, contestantsConfig, judgesConfig } =
     await verifyGenerationSources(generationPath, manifest);
   const presentation = await loadGalleryPresentation({
     generationPath,
@@ -902,6 +986,9 @@ export async function buildGallery(
   });
   const judgeNames = new Map(
     judgesConfig.judges.map((judge) => [judge.id, judge.displayName]),
+  );
+  const hasGuidance = contestantsConfig.contestants.some(
+    (contestant) => contestant.designGuidance !== undefined,
   );
   const stylesheet = await chooseStylesheet(generationPath, leaderboard);
   const publicPath = resolve(options.outputPath ?? join(generationPath, "public"));
@@ -1001,6 +1088,7 @@ export async function buildGallery(
               },
             ],
       ),
+      hasGuidance,
     );
 
     const renderer =
@@ -1047,30 +1135,71 @@ export async function buildGallery(
         throw new Error("public HTML contains a script or remote resource");
       }
       await writeTextAtomically(join(temporaryPath, "index.html"), publicHtml);
-      await writeJson(
-        join(temporaryPath, "metadata.json"),
-        PublicMetadataSchema.parse({
-          schemaVersion: 1,
-          seasonId: manifest.seasonId,
-          generationId: manifest.generationId,
-          generatedAt: leaderboard.generatedAt,
-          sourceGenerationIdentity: sourceGenerationIdentity(
-            manifestBytes,
-            snapshot.publicationSourceNonce,
-          ),
-          stylesheetKind: selectedStylesheet.kind,
-          championContestantId: selectedStylesheet.champion?.contestantId ?? null,
-          championDisplayName: selectedStylesheet.champion?.displayName ?? null,
-          championReason: selectedStylesheet.reason,
-          expectedJudgeCount: leaderboard.expectedJudgeCount,
-          entries: leaderboard.entries.map((entry) => ({
-            contestantId: entry.contestantId,
-            displayName: entry.displayName,
-            rank: entry.rank,
-            status: entry.status,
-          })),
-        }),
-      );
+      const publicMetadata = PublicMetadataSchema.parse({
+        schemaVersion: 1,
+        seasonId: manifest.seasonId,
+        generationId: manifest.generationId,
+        generatedAt: leaderboard.generatedAt,
+        sourceGenerationIdentity: sourceGenerationIdentity(
+          manifestBytes,
+          snapshot.publicationSourceNonce,
+        ),
+        stylesheetKind: selectedStylesheet.kind,
+        championContestantId: selectedStylesheet.champion?.contestantId ?? null,
+        championDisplayName: selectedStylesheet.champion?.displayName ?? null,
+        championReason: selectedStylesheet.reason,
+        expectedJudgeCount: leaderboard.expectedJudgeCount,
+        entries: leaderboard.entries.map((entry) => ({
+          contestantId: entry.contestantId,
+          displayName: entry.displayName,
+          rank: entry.rank,
+          status: entry.status,
+        })),
+        ...(hasGuidance
+          ? {
+              designGuidance: {
+                experiment: matchedGuidancePair(contestantsConfig)
+                  ? "Matched pair: the configured model, harness, reasoning effort, challenge HTML, and time/token budgets match; only the published design guidance differs."
+                  : "Design-guidance comparison: the published notes were provided only to entries labelled Guided; other contestant settings may differ.",
+                entries: await Promise.all(
+                  leaderboard.entries.map(async (entry) => {
+                    const contestant = contestantsConfig.contestants.find(
+                      (candidate) => candidate.id === entry.contestantId,
+                    );
+                    if (contestant === undefined)
+                      throw new Error(
+                        "guidance disclosure contestant is missing from archived configuration",
+                      );
+                    if (contestant.designGuidance === undefined) {
+                      return {
+                        displayName: entry.displayName,
+                        label: "Plain · no additional design guidance",
+                      };
+                    }
+                    const guidanceBytes = await readFile(
+                      join(generationPath, "guidance", `${contestant.id}.md`),
+                    );
+                    const guidanceContent = new TextDecoder("utf-8", {
+                      fatal: true,
+                    }).decode(guidanceBytes);
+                    return {
+                      displayName: entry.displayName,
+                      label: "Guided",
+                      content: guidanceContent,
+                    };
+                  }),
+                ),
+              },
+            }
+          : {}),
+      });
+      await writeJson(join(temporaryPath, "metadata.json"), publicMetadata);
+      if (publicMetadata.designGuidance !== undefined) {
+        await writeTextAtomically(
+          join(temporaryPath, "guidance.html"),
+          renderGuidancePage(publicMetadata.designGuidance),
+        );
+      }
       await renderer.render({
         rootPath: temporaryPath,
         entryFile: "index.html",

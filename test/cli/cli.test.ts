@@ -66,14 +66,18 @@ describe("garden CLI profile requirement", () => {
     const result = await runGarden(["create-generation", "--season", "001"]);
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("--profile is required for create-generation");
-    expect(result.stderr).toContain("checked-in profiles: fixture, real.example");
+    expect(result.stderr).toContain(
+      "checked-in profiles: fixture, fixture-guidance, real.example",
+    );
   });
 
   it("fails verify without --profile and lists the checked-in profiles", async () => {
     const result = await runGarden(["verify"]);
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("--profile is required for verify");
-    expect(result.stderr).toContain("checked-in profiles: fixture, real.example");
+    expect(result.stderr).toContain(
+      "checked-in profiles: fixture, fixture-guidance, real.example",
+    );
   });
 
   it("fails the creation paths of run-generation and run-wave-b without --profile", async () => {
@@ -81,7 +85,9 @@ describe("garden CLI profile requirement", () => {
       const result = await runGarden([command, "--season", "001"]);
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain(`--profile is required for ${command}`);
-      expect(result.stderr).toContain("checked-in profiles: fixture, real.example");
+      expect(result.stderr).toContain(
+        "checked-in profiles: fixture, fixture-guidance, real.example",
+      );
     }
   }, 15000);
 });

@@ -128,6 +128,47 @@ describe("configuration schemas", () => {
     ).toBeTruthy();
   });
 
+  it("accepts only optional season-pinned Markdown design guidance paths", () => {
+    const guided = {
+      ...contestant,
+      designGuidance: "challenge/season-004/guidance/luna-design.md",
+    };
+    expect(
+      ContestantsConfigSchema.parse({
+        schemaVersion: 1,
+        defaults: {
+          timeoutMs: 480000,
+          maximumTotalTokens: 30000,
+          maximumSubmissionBytes: 61440,
+          concurrency: 4,
+        },
+        contestants: [guided, { ...contestant, id: "second-contestant" }],
+      }).contestants[0]?.designGuidance,
+    ).toBe("challenge/season-004/guidance/luna-design.md");
+    for (const path of [
+      "../private.md",
+      "/tmp/private.md",
+      "challenge/season-004/guidance/notes.txt",
+      "challenge/season-004/notes.md",
+    ]) {
+      expect(() =>
+        ContestantsConfigSchema.parse({
+          schemaVersion: 1,
+          defaults: {
+            timeoutMs: 480000,
+            maximumTotalTokens: 30000,
+            maximumSubmissionBytes: 61440,
+            concurrency: 4,
+          },
+          contestants: [
+            { ...contestant, designGuidance: path },
+            { ...contestant, id: "second-contestant" },
+          ],
+        }),
+      ).toThrow();
+    }
+  });
+
   it("accepts the archived 1440px viewport contract for historical rebuilds", () => {
     const archived = ChallengeConfigSchema.parse({
       ...challengeConfig,

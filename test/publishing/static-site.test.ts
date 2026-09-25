@@ -69,6 +69,10 @@ describe("static publication export", () => {
       join(first.publicPath, "index.html"),
       "utf8",
     );
+    const plainViewer = await readFile(
+      join(first.publicPath, "designs/fixture-editorial/view.html"),
+      "utf8",
+    );
     const catalog = JSON.parse(
       await readFile(join(siteRoot, "catalog.json"), "utf8"),
     ) as {
@@ -77,6 +81,7 @@ describe("static publication export", () => {
 
     expect(first).toMatchObject({ seasonId: "0001", generationId: "0001" });
     expect(generationIndex).toContain('href="designs/fixture-editorial/view.html"');
+    expect(plainViewer).not.toContain("Contestant design guidance");
     await expect(
       readFile(join(first.publicPath, "designs/fixture-editorial/submission.css")),
     ).resolves.toEqual(
@@ -106,6 +111,38 @@ describe("static publication export", () => {
     });
     expect(await hashTree(siteRoot)).toBe(firstHash);
     expect(await hashTree(generation.generationPath)).toBe(sourceHash);
+  }, 30000);
+
+  it("exports post-judging guidance with a safe viewer navigation path", async () => {
+    const generationsRoot = await createTestTempRoot("cascade-publish-guidance-");
+    const siteRoot = await createTestTempRoot("cascade-publish-guidance-site-");
+    const generation = await createGeneration({
+      repositoryRoot,
+      generationsRoot,
+      seasonId: "0004",
+      profileId: "fixture-guidance",
+      generationId: "0001",
+      now: timestamp,
+    });
+    await runGeneration({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      generatedAt: timestamp,
+    });
+    const exported = await exportGenerationToStaticSite({
+      repositoryRoot,
+      generationPath: generation.generationPath,
+      siteRoot,
+    });
+    const guidance = await readFile(join(exported.publicPath, "guidance.html"), "utf8");
+    const viewer = await readFile(
+      join(exported.publicPath, "designs/luna-guided/view.html"),
+      "utf8",
+    );
+    expect(viewer).toContain('href="../../guidance.html"');
+    expect(guidance).toContain("Guidance provided after judging");
+    expect(guidance).toContain("Plain · no additional design guidance");
+    expect(guidance).toContain("Treat the page as a system of information");
   }, 30000);
 
   it("preserves a legacy gallery layout stylesheet while exporting the next generation", async () => {

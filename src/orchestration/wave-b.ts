@@ -261,6 +261,16 @@ interface CanonicalGenerationState {
 
 const MAX_INTEGRITY_FILE_BYTES = 64 * 1024 * 1024;
 
+async function assertNoWorkspaceGuidance(workspacePath: string): Promise<void> {
+  try {
+    await lstat(join(workspacePath, "design-guidance.md"));
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return;
+    throw error;
+  }
+  throw new Error("unconfigured contestant workspace contains design guidance");
+}
+
 function sha256(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
@@ -495,6 +505,7 @@ async function verifyCanonicalGenerationState(
     const generationRelative =
       provenancePath === "config/profile.json" ||
       provenancePath === "run-plan.json" ||
+      provenancePath.startsWith("guidance/") ||
       (state.legacyPhase1 &&
         (provenancePath === "config/contestants.yaml" ||
           provenancePath === "config/judges.yaml"));
@@ -524,6 +535,7 @@ async function verifyContestantWorkspace(
   state: CanonicalGenerationState,
   workspacePath: string,
   prompt: string,
+  contestant: ContestantConfig,
 ): Promise<void> {
   const expectedAssets = Object.keys(state.snapshot.assetHashes).filter(
     (relativePath) =>
@@ -536,6 +548,25 @@ async function verifyContestantWorkspace(
       `contestant workspace input ${relativePath}`,
       workspacePath,
     );
+  }
+  {
+    const guidanceHash = state.snapshot.inputHashes[`guidance/${contestant.id}.md`];
+    if (contestant.designGuidance !== undefined) {
+      if (guidanceHash === undefined) {
+        throw new Error("configured contestant guidance is missing from the snapshot");
+      }
+      await verifyRegularFileHash(
+        join(workspacePath, "design-guidance.md"),
+        guidanceHash,
+        "contestant design guidance",
+        workspacePath,
+      );
+    } else {
+      if (guidanceHash !== undefined) {
+        throw new Error("snapshot guidance exists for an unconfigured contestant");
+      }
+      await assertNoWorkspaceGuidance(workspacePath);
+    }
   }
   const promptPath = join(workspacePath, "prompt.md");
   const promptFile = await readRegularFileAtMost(
@@ -1263,11 +1294,32 @@ async function countPendingCommandCalls(
 async function ensureContestantPrompt(
   contestantPath: string,
   workspacePath: string,
+  contestant: ContestantConfig,
+  canonicalState: CanonicalGenerationState,
 ): Promise<string> {
+  const guidancePath = join(workspacePath, "design-guidance.md");
+  const guidanceHash =
+    canonicalState.snapshot.inputHashes[`guidance/${contestant.id}.md`];
+  if ((contestant.designGuidance !== undefined) !== (guidanceHash !== undefined)) {
+    throw new Error("archived contestant guidance config does not match its snapshot");
+  }
+  if (contestant.designGuidance !== undefined) {
+    await verifyRegularFileHash(
+      guidancePath,
+      guidanceHash!,
+      "contestant design guidance",
+      workspacePath,
+    );
+  } else {
+    await assertNoWorkspaceGuidance(workspacePath);
+  }
   const prompt = buildContestantGenerationOnePrompt({
     submissionPath: join(workspacePath, "submission.css"),
     challengePath: join(workspacePath, "challenge.html"),
     starterCssPath: join(workspacePath, "starter.css"),
+    ...(contestant.designGuidance === undefined
+      ? {}
+      : { designGuidancePath: guidancePath }),
   });
   await writeTextAtomically(join(contestantPath, "prompt.md"), prompt);
   await writeTextAtomically(join(workspacePath, "prompt.md"), prompt);
@@ -1372,8 +1424,30 @@ async function runOneContestant(
   );
   try {
     try {
-      prompt = await ensureContestantPrompt(contestantPath, workspacePath);
-      await verifyContestantWorkspace(input.canonicalState, workspacePath, prompt);
+      try {
+        const workspaceStatus = await lstat(workspacePath);
+        if (workspaceStatus.isSymbolicLink() || !workspaceStatus.isDirectory()) {
+          throw new Error("contestant workspace is not a real directory");
+        }
+      } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+          await restoreContestantWorkspace(input);
+        } else {
+          throw error;
+        }
+      }
+      prompt = await ensureContestantPrompt(
+        contestantPath,
+        workspacePath,
+        input.contestant,
+        input.canonicalState,
+      );
+      await verifyContestantWorkspace(
+        input.canonicalState,
+        workspacePath,
+        prompt,
+        input.contestant,
+      );
     } catch (error) {
       integrityError = `contestant workspace integrity check failed: ${boundedError(error)}`;
     }
@@ -1402,7 +1476,12 @@ async function runOneContestant(
       const postAttemptErrors: string[] = [];
       try {
         if (prompt === null) throw new Error("contestant prompt was not created");
-        await verifyContestantWorkspace(input.canonicalState, workspacePath, prompt);
+        await verifyContestantWorkspace(
+          input.canonicalState,
+          workspacePath,
+          prompt,
+          input.contestant,
+        );
       } catch (error) {
         postAttemptErrors.push(
           `contestant workspace integrity check failed: ${boundedError(error)}`,
@@ -1626,8 +1705,37 @@ async function restoreContestantWorkspace(input: RunContestantInput): Promise<st
     await mkdir(dirname(destinationPath), { recursive: true });
     await copyFile(sourcePath, destinationPath);
   }
-  const prompt = await ensureContestantPrompt(contestantPath, workspacePath);
-  await verifyContestantWorkspace(input.canonicalState, workspacePath, prompt);
+  if (input.contestant.designGuidance !== undefined) {
+    const guidanceArchive = join(
+      input.generationPath,
+      "guidance",
+      `${input.contestant.id}.md`,
+    );
+    const guidanceHash =
+      input.canonicalState.snapshot.inputHashes[`guidance/${input.contestant.id}.md`];
+    if (guidanceHash === undefined) {
+      throw new Error("configured contestant guidance is missing from the snapshot");
+    }
+    await verifyRegularFileHash(
+      guidanceArchive,
+      guidanceHash,
+      "archived contestant design guidance",
+      input.generationPath,
+    );
+    await copyFile(guidanceArchive, join(workspacePath, "design-guidance.md"));
+  }
+  const prompt = await ensureContestantPrompt(
+    contestantPath,
+    workspacePath,
+    input.contestant,
+    input.canonicalState,
+  );
+  await verifyContestantWorkspace(
+    input.canonicalState,
+    workspacePath,
+    prompt,
+    input.contestant,
+  );
   return prompt;
 }
 

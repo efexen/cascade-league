@@ -52,7 +52,7 @@ const ALLOWED_PUBLICATION_PATHS = [
   /^seasons$/u,
   /^seasons\/\d{4}$/u,
   /^seasons\/\d{4}\/\d{4}$/u,
-  /^seasons\/\d{4}\/\d{4}\/(?:champion\.css|gallery-layout\.css|gallery-screenshot\.png|gallery-viewport\.png|index\.html|metadata\.json)$/u,
+  /^seasons\/\d{4}\/\d{4}\/(?:champion\.css|gallery-layout\.css|gallery-screenshot\.png|gallery-viewport\.png|guidance\.html|index\.html|metadata\.json)$/u,
   /^seasons\/\d{4}\/\d{4}\/screenshots$/u,
   /^seasons\/\d{4}\/\d{4}\/screenshots\/entry-\d{3}(?:-full)?\.png$/u,
   /^seasons\/\d{4}\/\d{4}\/fonts$/u,

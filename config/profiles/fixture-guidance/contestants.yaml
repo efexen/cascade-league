@@ -1,0 +1,40 @@
+schemaVersion: 1
+defaults:
+  timeoutMs: 480000
+  maximumTotalTokens: 30000
+  maximumSubmissionBytes: 61440
+  concurrency: 2
+contestants:
+  - id: luna-plain
+    displayName: Luna · Plain
+    harness:
+      name: Luna fixture harness
+      version: "1.0.0"
+      adapter: fixture
+      fixture: editorial
+    model:
+      provider: local-fixture
+      name: Luna stub
+      version: "1.0.0"
+      reasoningEffort: high
+    budget:
+      timeoutMs: 480000
+      maximumTotalTokens: 30000
+    enabled: true
+  - id: luna-guided
+    displayName: Luna · Guided
+    harness:
+      name: Luna fixture harness
+      version: "1.0.0"
+      adapter: fixture
+      fixture: editorial
+    model:
+      provider: local-fixture
+      name: Luna stub
+      version: "1.0.0"
+      reasoningEffort: high
+    budget:
+      timeoutMs: 480000
+      maximumTotalTokens: 30000
+    designGuidance: challenge/season-004/guidance/luna-design.md
+    enabled: true

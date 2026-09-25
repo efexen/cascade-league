@@ -1,0 +1,36 @@
+schemaVersion: 1
+defaults:
+  timeoutMs: 180000
+  maximumOutputTokens: 4000
+  concurrencyPerJudge: 2
+judges:
+  - id: fixture-critic-a
+    displayName: Fixture Critic A
+    harness:
+      name: fixture-judge
+      version: "1.0.0"
+      adapter: fixture
+      fixture: critic-a
+    model:
+      provider: local-fixture
+      name: critic-a-model
+      version: "1.0.0"
+    budget:
+      timeoutMs: 180000
+      maximumOutputTokens: 4000
+    enabled: true
+  - id: fixture-critic-b
+    displayName: Fixture Critic B
+    harness:
+      name: fixture-judge
+      version: "1.0.0"
+      adapter: fixture
+      fixture: critic-b
+    model:
+      provider: local-fixture
+      name: critic-b-model
+      version: "1.0.0"
+    budget:
+      timeoutMs: 180000
+      maximumOutputTokens: 4000
+    enabled: true

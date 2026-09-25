@@ -213,6 +213,10 @@ interface SnapshotInputHashesInput {
   readonly previousPresentation: Awaited<
     ReturnType<typeof loadGalleryPresentation>
   > | null;
+  readonly guidanceSources: ReadonlyMap<
+    string,
+    { readonly sourcePath: string; readonly archivePath: string }
+  >;
 }
 
 async function buildSnapshotInputHashes(
@@ -230,6 +234,10 @@ async function buildSnapshotInputHashes(
   addRepositorySource(join(input.seasonRoot, input.definition.config.starterCss));
   addRepositorySource(join(input.seasonRoot, input.definition.config.fallbackCss));
   addRepositorySource(join(input.seasonRoot, input.definition.config.seedData));
+  for (const [contestantId, guidance] of input.guidanceSources) {
+    addRepositorySource(guidance.sourcePath);
+    sources.set(`guidance/${contestantId}.md`, guidance.archivePath);
+  }
 
   // The generation-relative durable artifact `config/profile.json` is hashed
   // from the copy written inside the generation, not from a repository source.
@@ -528,10 +536,19 @@ async function copyContestantInputs(
   anonymousCandidateId: string,
   challengeFiles: readonly string[],
   contestantsConfig: ContestantsConfig,
+  guidanceBytes?: Buffer,
 ): Promise<void> {
   const contestantPath = join(generationPath, "contestants", contestant.id);
   const workspacePath = join(contestantPath, "workspace");
   await mkdir(workspacePath, { recursive: true });
+  if (guidanceBytes !== undefined) {
+    const archivePath = join(generationPath, "guidance", `${contestant.id}.md`);
+    await mkdir(dirname(archivePath), { recursive: true });
+    await writeFile(archivePath, guidanceBytes, { mode: 0o600 });
+    await writeFile(join(workspacePath, "design-guidance.md"), guidanceBytes, {
+      mode: 0o400,
+    });
+  }
   for (const relativePath of challengeFiles.filter(
     (file) => file !== "fallback.css" && file !== GALLERY_SOURCE_ARCHIVE_FILE,
   )) {
@@ -655,6 +672,59 @@ export async function createGeneration(
 
   if (definition.config.seasonId !== seasonId) {
     throw new Error("requested seasonId does not match challenge configuration");
+  }
+  const guidanceSources = new Map<
+    string,
+    { sourcePath: string; archivePath: string }
+  >();
+  const guidanceBytesByContestant = new Map<string, Buffer>();
+  for (const contestant of contestantsConfig.contestants.filter(
+    (entry) => entry.enabled,
+  )) {
+    if (contestant.designGuidance === undefined) continue;
+    const expectedSeasonPath = `challenge/${seasonDirectoryName(seasonId)}/guidance/`;
+    if (!contestant.designGuidance.startsWith(expectedSeasonPath)) {
+      throw new Error(`design guidance must belong to selected season ${seasonId}`);
+    }
+    const sourcePath = join(repositoryRoot, ...contestant.designGuidance.split("/"));
+    const guidanceDirectory = dirname(sourcePath);
+    const seasonGuidanceDirectory = join(seasonRoot, "guidance");
+    for (const directory of [
+      join(repositoryRoot, "challenge"),
+      seasonRoot,
+      seasonGuidanceDirectory,
+    ]) {
+      const status = await lstat(directory);
+      if (status.isSymbolicLink() || !status.isDirectory()) {
+        throw new Error(`design guidance path must use real directories: ${directory}`);
+      }
+    }
+    if (resolve(guidanceDirectory) !== resolve(seasonGuidanceDirectory)) {
+      throw new Error(
+        "design guidance must be directly inside the season guidance directory",
+      );
+    }
+    const status = await lstat(sourcePath);
+    if (status.isSymbolicLink() || !status.isFile()) {
+      throw new Error(
+        `design guidance must be a regular file: ${contestant.designGuidance}`,
+      );
+    }
+    if (status.size > 16 * 1024) {
+      throw new Error(
+        `design guidance exceeds the 16384-byte limit: ${contestant.designGuidance}`,
+      );
+    }
+    const bytes = await readFile(sourcePath);
+    try {
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      throw new Error(
+        `design guidance must be valid UTF-8: ${contestant.designGuidance}`,
+      );
+    }
+    guidanceBytesByContestant.set(contestant.id, bytes);
+    guidanceSources.set(contestant.id, { sourcePath, archivePath: "" });
   }
   if (
     contestantsConfig.contestants.filter((contestant) => contestant.enabled).length < 2
@@ -951,6 +1021,18 @@ export async function createGeneration(
         ),
       ),
     );
+    for (const [contestantId, guidance] of guidanceSources) {
+      const archivePath = join(
+        temporaryGenerationPath,
+        "guidance",
+        `${contestantId}.md`,
+      );
+      await mkdir(dirname(archivePath), { recursive: true });
+      await writeFile(archivePath, guidanceBytesByContestant.get(contestantId)!, {
+        mode: 0o600,
+      });
+      guidanceSources.set(contestantId, { ...guidance, archivePath });
+    }
     const inputHashes = await buildSnapshotInputHashes({
       repositoryRoot,
       seasonRoot,
@@ -964,7 +1046,19 @@ export async function createGeneration(
       previousGenerationPath,
       previousLeaderboard,
       previousPresentation,
+      guidanceSources,
     });
+    for (const contestantId of guidanceSources.keys()) {
+      const guidance = guidanceSources.get(contestantId)!;
+      const sourceHash =
+        inputHashes[repositoryRelativePath(repositoryRoot, guidance.sourcePath)];
+      const archivedHash = inputHashes[`guidance/${contestantId}.md`];
+      if (sourceHash === undefined || sourceHash !== archivedHash) {
+        throw new Error(
+          `design guidance source changed while snapshotting: ${guidance.sourcePath}`,
+        );
+      }
+    }
     const snapshot = {
       schemaVersion: 1 as const,
       publicationSourceNonce: secureRandomBytes(32).toString("hex"),
@@ -1014,6 +1108,7 @@ export async function createGeneration(
         anonymousCandidateId,
         challengeFiles,
         contestantsConfig,
+        guidanceBytesByContestant.get(contestant.id),
       );
     }
 

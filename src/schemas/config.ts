@@ -284,6 +284,11 @@ const ContestantSchema = z
     model: ModelSchema,
     budget: ContestantBudgetSchema.optional(),
     execution: EntryExecutionSchema.optional(),
+    designGuidance: RelativePosixPathSchema.refine(
+      (path) =>
+        /^challenge\/season-\d{3}\/guidance\/[a-z0-9][a-z0-9-]*\.md$/u.test(path),
+      "must point to an allowlisted season guidance Markdown file",
+    ).optional(),
     enabled: z.boolean(),
   })
   .strict();

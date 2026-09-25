@@ -244,3 +244,24 @@ See [artifacts](docs/artifacts.md) and [publishing](docs/publishing.md) before s
 | Gallery is not the expected screenshot size               | Read copied `config/challenge.yaml`; current seasons use 1280 × 1200, historical plans use 1440 × 1200. Public full-page images are distinct from judged viewport images.                |
 | Export rejects unexpected files/symlinks                  | Use a separate content-only destination; see the publication allowlist. Do not disable the audit.                                                                                        |
 | Git push denied                                           | Local export grants no remote rights. Check the remote is your own repository and your account has write permission.                                                                     |
+
+### Offline Season 004 guidance pair
+
+The `fixture-guidance` profile is an offline engine fixture for the controlled
+Luna plain/guided pair. Both entries use the same fixture harness, Luna stub
+label, high reasoning setting, challenge, and token/time budgets; only the
+second entry receives `challenge/season-004/guidance/luna-design.md`. Guidance
+is bounded Markdown data, snapshotted with its hash, and is never loaded as a
+Hermes or OpenCode skill. To create and complete a fresh fixture generation:
+
+```sh
+pnpm garden create-generation --season 004 --profile fixture-guidance \
+  --generations-root /tmp/cascade-season-004-guidance
+pnpm garden run-generation --generation 0001 \
+  --generations-root /tmp/cascade-season-004-guidance
+```
+
+The generated public metadata discloses the guidance label and full text only
+after judging. Only the guided contestant's private workspace receives the
+Markdown file; judging prompts and workspaces receive no guidance or identity
+metadata. Rebuilding the gallery reads the archived generation copy.

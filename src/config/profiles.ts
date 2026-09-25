@@ -251,7 +251,7 @@ export async function listCheckedInProfiles(repositoryRoot: string): Promise<str
   }
   const profiles: string[] = [];
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory() || entry.name.endsWith(".local")) continue;
     const status = await lstat(join(profilesRoot, entry.name)).catch(() => undefined);
     if (status === undefined || status.isSymbolicLink() || !status.isDirectory()) {
       continue;
