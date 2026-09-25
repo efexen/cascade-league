@@ -1,4 +1,5 @@
 AGENTS.md
+.hermes/plans/
 local-maxima-planning/
 node_modules/
 generations/

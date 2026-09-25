@@ -59,7 +59,7 @@ const ALLOWED_PUBLICATION_PATHS = [
   /^seasons\/\d{4}\/\d{4}\/fonts\/(?:[a-z0-9.-]+\.ttf|OFL-[a-z0-9.-]+\.txt)$/iu,
   /^seasons\/\d{4}\/\d{4}\/designs$/u,
   /^seasons\/\d{4}\/\d{4}\/designs\/[a-z0-9]+(?:-[a-z0-9]+)*$/u,
-  /^seasons\/\d{4}\/\d{4}\/designs\/[a-z0-9]+(?:-[a-z0-9]+)*\/(?:index\.html|submission\.css)$/u,
+  /^seasons\/\d{4}\/\d{4}\/designs\/[a-z0-9]+(?:-[a-z0-9]+)*\/(?:index\.html|view\.html|submission\.css)$/u,
   /^seasons\/\d{4}\/\d{4}\/designs\/[a-z0-9]+(?:-[a-z0-9]+)*\/(?:fonts|thumbnails)$/u,
   /^seasons\/\d{4}\/\d{4}\/designs\/[a-z0-9]+(?:-[a-z0-9]+)*\/fonts\/(?:[a-z0-9.-]+\.ttf|OFL-[a-z0-9.-]+\.txt)$/iu,
   /^seasons\/\d{4}\/\d{4}\/designs\/[a-z0-9]+(?:-[a-z0-9]+)*\/thumbnails\/[a-z0-9]+(?:-[a-z0-9]+)*\.png$/u,

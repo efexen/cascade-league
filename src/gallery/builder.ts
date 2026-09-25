@@ -151,6 +151,123 @@ function publicDesignPath(contestantId: string): string {
   return `designs/${contestantId}/index.html`;
 }
 
+function publicViewerPath(contestantId: string): string {
+  return `designs/${contestantId}/view.html`;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/gu, (character) => {
+    switch (character) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      default:
+        return "&#39;";
+    }
+  });
+}
+
+interface ViewerEntry {
+  readonly contestantId: string;
+  readonly displayName: string;
+  readonly rank: number | null;
+  readonly statusLabel: string;
+  readonly combinedScore: number | null;
+  readonly screenshotPath: string;
+}
+
+function renderDesignViewer(
+  seasonId: string,
+  generationId: string,
+  entry: ViewerEntry,
+  entries: readonly ViewerEntry[],
+): string {
+  const index = entries.findIndex(
+    (candidate) => candidate.contestantId === entry.contestantId,
+  );
+  const previous = entries[index - 1];
+  const next = entries[index + 1];
+  const label = escapeHtml(entry.displayName);
+  const result = `Rank ${entry.rank === null ? "—" : String(entry.rank)} · ${scoreLabel(entry.combinedScore)} · ${escapeHtml(entry.statusLabel)}`;
+  const contestantLinks = entries
+    .map((candidate) => {
+      const current = candidate.contestantId === entry.contestantId;
+      return `<li><a href="../${escapeHtml(candidate.contestantId)}/view.html"${current ? ' aria-current="page"' : ""}>${escapeHtml(candidate.displayName)}${current ? " (current)" : ""}</a></li>`;
+    })
+    .join("\n          ");
+  const previousLink =
+    previous === undefined
+      ? '<span aria-disabled="true">Previous design</span>'
+      : `<a rel="prev" href="../${escapeHtml(previous.contestantId)}/view.html">Previous design: ${escapeHtml(previous.displayName)}</a>`;
+  const nextLink =
+    next === undefined
+      ? '<span aria-disabled="true">Next design</span>'
+      : `<a rel="next" href="../${escapeHtml(next.contestantId)}/view.html">Next design: ${escapeHtml(next.displayName)}</a>`;
+  const screenshotFile = entry.screenshotPath.replace(/\.png$/u, "-full.png");
+  const iframeTitle = `${entry.displayName} design, Season ${seasonId}, Generation ${generationId}`;
+
+  return `<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; frame-src 'self'; base-uri 'none'; form-action 'none'">
+    <meta name="referrer" content="no-referrer">
+    <title>${label} · Season ${seasonId}, Generation ${generationId}</title>
+    <style>
+      *{box-sizing:border-box}html,body{width:100%;height:100%;margin:0}body{overflow:hidden;background:#11120f;color:#f1f2e9;font:14px/1.4 system-ui,sans-serif}.viewer{display:flex;flex-direction:column;width:100%;height:100vh;height:100dvh;min-height:0}.bar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:.5rem 1.25rem;padding:.65rem 1rem;background:#11120f;border-bottom:1px solid #45483b}.identity{min-width:0}.eyebrow{margin:0;color:#c1c5b4;font-size:.75rem;letter-spacing:.04em}.identity h1{overflow-wrap:anywhere;margin:.1rem 0 0;font-size:1rem;line-height:1.25}.result{margin:.12rem 0 0;color:#dfff39;font-size:.8rem}.controls{display:flex;align-items:center;justify-content:flex-end;gap:.75rem}.controls a,.controls summary,.context a{color:#dfff39;text-underline-offset:.2em}.entry-nav{display:flex;gap:.75rem}.entry-nav span{color:#818575}.switcher{position:relative}.switcher summary{cursor:pointer;white-space:nowrap}.switcher ul{position:absolute;z-index:2;top:calc(100% + .5rem);right:0;width:min(24rem,calc(100vw - 2rem));max-height:min(60vh,28rem);overflow:auto;margin:0;padding:.5rem;background:#20221c;border:1px solid #636752;list-style:none}.switcher li+li{border-top:1px solid #45483b}.switcher li a{display:block;padding:.55rem .65rem;overflow-wrap:anywhere}.context{display:flex;align-items:center;gap:.8rem;padding:.3rem 1rem;background:#24261e;color:#d5d8c9;font-size:.75rem}.context p{margin:0}.gallery-link{flex:none}.design-frame{display:block;flex:1 1 auto;width:100%;min-height:0;border:0;background:#fff}@media(max-width:600px){.bar{grid-template-columns:minmax(0,1fr);gap:.55rem;padding:.55rem .75rem}.controls{justify-content:space-between;flex-wrap:wrap}.entry-nav{flex:1;justify-content:space-between;gap:.35rem}.controls a,.controls summary{font-size:.82rem}.context{align-items:flex-start;padding:.4rem .75rem}.design-frame{min-height:0}}
+    </style>
+  </head>
+  <body>
+    <main class="viewer">
+      <header class="bar">
+        <div class="identity">
+          <p class="eyebrow">Season ${seasonId} · Generation ${generationId}</p>
+          <h1>${label}</h1>
+          <p class="result">Current generation result: ${result}</p>
+        </div>
+        <div class="controls">
+          <nav class="entry-nav" aria-label="Contestant designs">${previousLink}${nextLink}</nav>
+          <details class="switcher">
+            <summary>Browse contestants</summary>
+            <ul aria-label="All viewable contestants">
+          ${contestantLinks}
+            </ul>
+          </details>
+        </div>
+      </header>
+      <div class="context">
+        <a class="gallery-link" href="../../index.html">Back to gallery</a>
+        <p>The embedded design styles previous-generation standings. This bar identifies the current entry and result.</p>
+        <a href="index.html">Raw design HTML</a>
+        <a href="../../${escapeHtml(screenshotFile)}">Full-size screenshot</a>
+      </div>
+      <iframe class="design-frame" title="${escapeHtml(iframeTitle)}" src="index.html" sandbox="allow-same-origin"></iframe>
+    </main>
+  </body>
+</html>
+`;
+}
+
+async function writeDesignViewers(
+  rootPath: string,
+  seasonId: string,
+  generationId: string,
+  entries: readonly ViewerEntry[],
+): Promise<void> {
+  for (const entry of entries) {
+    await writeTextAtomically(
+      join(rootPath, publicViewerPath(entry.contestantId)),
+      renderDesignViewer(seasonId, generationId, entry, entries),
+    );
+  }
+}
+
 async function assertRegularFile(path: string, description: string): Promise<void> {
   const status = await lstat(path);
   if (status.isSymbolicLink() || !status.isFile()) {
@@ -273,7 +390,7 @@ async function stagePublicDesign(
     join(challengeRoot, "thumbnails"),
     join(destinationRoot, "thumbnails"),
   );
-  return relativePath;
+  return publicViewerPath(contestantId);
 }
 
 async function writeJson(path: string, value: unknown): Promise<void> {
@@ -651,8 +768,7 @@ function pageEntries(
     ...(fullDesignPaths[index] === null
       ? {}
       : {
-          // Historical archived templates used this field as their action URL.
-          fullScreenshotPath: fullDesignPaths[index]!,
+          fullScreenshotPath: screenshotPaths[index]!.replace(/\.png$/u, "-full.png"),
           fullDesignPath: fullDesignPaths[index]!,
         }),
     combinedScoreLabel: scoreLabel(entry.combinedScore),
@@ -863,6 +979,29 @@ export async function buildGallery(
       }
       screenshotPaths.push(publicRelativePath);
     }
+
+    await writeDesignViewers(
+      temporaryPath,
+      manifest.seasonId,
+      manifest.generationId,
+      leaderboard.entries.flatMap((entry, index) =>
+        fullDesignPaths[index] === null
+          ? []
+          : [
+              {
+                contestantId: entry.contestantId,
+                displayName: entry.displayName,
+                rank: entry.rank,
+                statusLabel: statusLabel(
+                  entry.status,
+                  definition.staticCopy.statusLabels,
+                ),
+                combinedScore: entry.combinedScore,
+                screenshotPath: screenshotPaths[index]!,
+              },
+            ],
+      ),
+    );
 
     const renderer =
       options.renderer ??

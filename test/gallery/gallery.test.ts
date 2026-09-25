@@ -878,7 +878,7 @@ describe("static public gallery", () => {
     const html = await readFile(join(result.gallery.publicPath, "index.html"), "utf8");
     const designPath = `designs/${firstEntry.contestantId}`;
     expect(html).toContain('src="screenshots/entry-001.png"');
-    expect(html).toContain(`href="${designPath}/index.html"`);
+    expect(html).toContain(`href="${designPath}/view.html"`);
     expect(html).not.toContain('href="screenshots/entry-001-full.png"');
     expect(html).toMatch(/View\s+full design/u);
     await expect(
@@ -924,6 +924,50 @@ describe("static public gallery", () => {
     expect(judgeNotesMarkup).toContain("Estimated cost");
 
     expect(html).not.toContain("gallery-layout.css");
+  }, 30000);
+
+  it("builds a public-only design viewer with adjacent entry navigation", async () => {
+    const generationsRoot = await createTestTempRoot("cascade-gallery-viewer-");
+    const { generation, result } =
+      await createCompletedFixtureGeneration(generationsRoot);
+    const viewableEntries = result.leaderboard.entries.filter(
+      (entry) => entry.screenshotPath !== null,
+    );
+    expect(viewableEntries.length).toBeGreaterThan(1);
+    const selected = viewableEntries[0]!;
+    const contestantId = selected.contestantId;
+    const viewerPath = join(
+      result.gallery.publicPath,
+      "designs",
+      contestantId,
+      "view.html",
+    );
+    const viewer = await readFile(viewerPath, "utf8");
+    const gallery = await readFile(
+      join(result.gallery.publicPath, "index.html"),
+      "utf8",
+    );
+    const rawDesign = await readFile(
+      join(result.gallery.publicPath, "designs", contestantId, "index.html"),
+    );
+
+    expect(gallery).toContain(`href="designs/${contestantId}/view.html"`);
+    expect(viewer).toContain(`Season ${result.leaderboard.seasonId}`);
+    expect(viewer).toContain(`Generation ${result.leaderboard.generationId}`);
+    expect(viewer).toContain(selected.displayName);
+    expect(viewer).toContain("previous-generation standings");
+    expect(viewer).toContain('<iframe class="design-frame" title="');
+    expect(viewer).toContain("<details");
+    expect(viewer).toContain("<summary");
+    expect(viewer).toContain("Previous design");
+    expect(viewer).toContain("Next design");
+    expect(viewer).toContain("../../index.html");
+    expect(viewer).toContain("../../screenshots/");
+    expect(viewer).toContain(`href="index.html"`);
+    expect(viewer).not.toMatch(/<script\b|https?:|\/\//iu);
+    await expect(rawDesign).toEqual(
+      await readFile(join(generation.generationPath, "challenge/challenge.html")),
+    );
   }, 30000);
 
   it("escapes model strings while preserving the script-free local-resource policy", async () => {

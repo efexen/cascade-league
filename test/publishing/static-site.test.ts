@@ -76,7 +76,7 @@ describe("static publication export", () => {
     };
 
     expect(first).toMatchObject({ seasonId: "0001", generationId: "0001" });
-    expect(generationIndex).toContain('href="designs/fixture-editorial/index.html"');
+    expect(generationIndex).toContain('href="designs/fixture-editorial/view.html"');
     await expect(
       readFile(join(first.publicPath, "designs/fixture-editorial/submission.css")),
     ).resolves.toEqual(
