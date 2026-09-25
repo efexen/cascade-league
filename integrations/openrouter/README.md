@@ -9,7 +9,12 @@ inferred using the same generic output path aliases documented by the other
 bundled judge adapters.
 
 The request requires `--model` and `--max-completion-tokens`, sends
-`provider.allow_fallbacks: false`, and does not retry. It rejects HTTP errors,
+`provider.allow_fallbacks: false`, and does not retry. The optional bounded
+`--request-timeout-ms` defaults to 120,000 ms; the private Season 004 profile
+sets it below each harness task deadline (420,000 ms for contestants and
+180,000 ms for the judge). A timeout is a failed one-shot attempt, not permission
+to retry; OpenRouter may still bill work completed after the client aborts.
+It rejects HTTP errors,
 malformed or oversized responses, missing/empty content, non-normal finish
 reasons (including token truncation), invalid judge JSON, and CSS wrapped in
 Markdown. Inputs, image bytes, request time, and response bytes are bounded.

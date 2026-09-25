@@ -8,6 +8,7 @@ import {
   isEntrypoint,
   option,
   parseOptions,
+  parseRequestTimeout,
   readBoundedImage,
   readBoundedText,
   requestCompletion,
@@ -21,6 +22,7 @@ export type JudgeOperation = "score" | "awards";
 export interface JudgeOptions {
   readonly model: string;
   readonly maxCompletionTokens: number;
+  readonly requestTimeoutMs?: number;
   readonly workspacePath: string;
   readonly promptPath: string;
   readonly candidateScreenshotPath: string;
@@ -58,6 +60,7 @@ export function parseJudgeOptions(argv: readonly string[]): JudgeOptions {
   return {
     model: option(values, "--model"),
     maxCompletionTokens,
+    requestTimeoutMs: parseRequestTimeout(values["--request-timeout-ms"]),
     workspacePath: option(values, "--workspace-path"),
     promptPath: option(values, "--prompt-path"),
     candidateScreenshotPath: option(values, "--candidate-screenshot-path"),
@@ -127,6 +130,9 @@ export async function runJudge(
       apiKey: deps.apiKey ?? process.env.OPENROUTER_API_KEY ?? "",
       model: input.model,
       maxCompletionTokens: input.maxCompletionTokens,
+      ...(input.requestTimeoutMs === undefined
+        ? {}
+        : { timeoutMs: input.requestTimeoutMs }),
       content,
     },
     {

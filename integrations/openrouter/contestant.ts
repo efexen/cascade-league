@@ -7,6 +7,7 @@ import {
   isEntrypoint,
   option,
   parseOptions,
+  parseRequestTimeout,
   readBoundedText,
   requestCompletion,
   metadata,
@@ -18,6 +19,7 @@ import {
 export interface ContestantOptions {
   readonly model: string;
   readonly maxCompletionTokens: number;
+  readonly requestTimeoutMs?: number;
   readonly workspacePath: string;
   readonly challengePath: string;
   readonly starterCssPath: string;
@@ -49,6 +51,7 @@ export function parseContestantOptions(argv: readonly string[]): ContestantOptio
   return {
     model: option(values, "--model"),
     maxCompletionTokens,
+    requestTimeoutMs: parseRequestTimeout(values["--request-timeout-ms"]),
     workspacePath: option(values, "--workspace-path"),
     challengePath: option(values, "--challenge-path"),
     starterCssPath: option(values, "--starter-css-path"),
@@ -83,6 +86,9 @@ export async function runContestant(
       apiKey: deps.apiKey ?? process.env.OPENROUTER_API_KEY ?? "",
       model: input.model,
       maxCompletionTokens: input.maxCompletionTokens,
+      ...(input.requestTimeoutMs === undefined
+        ? {}
+        : { timeoutMs: input.requestTimeoutMs }),
       content: `${prompt.trimEnd()}\n\nDirect-response adapter: you have no filesystem or browser access. The adapter will write your response to the named submission.css path. Treat the following inlined files as the supplied local files; do not claim to have opened or written them.\n\nChallenge HTML:\n${challenge}\n\nStarter CSS:\n${starterCss}\n\nRespond with only the complete CSS for submission.css, without Markdown fences or explanation. This is your sole attempt; do not request a retry or a preview.`,
     },
     {

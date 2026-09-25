@@ -20,7 +20,23 @@ export const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completion
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 const MAX_REQUEST_BYTES = 16 * 1024 * 1024;
-const REQUEST_TIMEOUT_MS = 120_000;
+export const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
+export const MAX_REQUEST_TIMEOUT_MS = 600_000;
+
+export function parseRequestTimeout(value: string | undefined): number {
+  if (value === undefined) return DEFAULT_REQUEST_TIMEOUT_MS;
+  const timeoutMs = Number(value);
+  if (
+    !Number.isSafeInteger(timeoutMs) ||
+    timeoutMs < 1 ||
+    timeoutMs > MAX_REQUEST_TIMEOUT_MS
+  ) {
+    throw new Error(
+      `--request-timeout-ms must be a positive safe integer no greater than ${MAX_REQUEST_TIMEOUT_MS}`,
+    );
+  }
+  return timeoutMs;
+}
 
 export {
   MAX_CSS_BYTES,
@@ -159,6 +175,16 @@ export async function requestCompletion(
   options: { readonly endpoint?: string; readonly fetchImpl?: typeof fetch } = {},
 ): Promise<CompletionResult> {
   if (!input.apiKey.trim()) throw new Error("OPENROUTER_API_KEY is required");
+  const timeoutMs = input.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  if (
+    !Number.isSafeInteger(timeoutMs) ||
+    timeoutMs < 1 ||
+    timeoutMs > MAX_REQUEST_TIMEOUT_MS
+  ) {
+    throw new Error(
+      `request timeout must be a positive safe integer no greater than ${MAX_REQUEST_TIMEOUT_MS}`,
+    );
+  }
   const endpoint = options.endpoint ?? OPENROUTER_ENDPOINT;
   if (endpoint !== OPENROUTER_ENDPOINT) {
     const url = new URL(endpoint);
@@ -181,10 +207,7 @@ export async function requestCompletion(
     throw new Error("OpenRouter request exceeds the request byte limit");
   }
   const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    input.timeoutMs ?? REQUEST_TIMEOUT_MS,
-  );
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     let response: Response;
     try {

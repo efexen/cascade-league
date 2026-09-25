@@ -10,10 +10,32 @@ import {
 } from "../../integrations/openrouter/contestant.js";
 import {
   inferJudgeOperation,
+  parseJudgeOptions,
   runJudge,
   type JudgeOptions,
 } from "../../integrations/openrouter/judge.js";
 import { requestCompletion } from "../../integrations/openrouter/shared.js";
+
+const contestantArgv = [
+  "--model",
+  "qwen/qwen3-coder-next",
+  "--max-completion-tokens",
+  "512",
+  "--workspace-path",
+  "/tmp/work",
+  "--challenge-path",
+  "/tmp/challenge.html",
+  "--starter-css-path",
+  "/tmp/starter.css",
+  "--prompt-path",
+  "/tmp/prompt.md",
+  "--submission-path",
+  "/tmp/submission.css",
+  "--execution-metadata-path",
+  "/tmp/metadata.json",
+  "--usage-path",
+  "/tmp/usage.json",
+];
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -141,6 +163,102 @@ describe("OpenRouter adapter contract", () => {
         "/tmp/usage.json",
       ]),
     ).not.toThrow();
+  });
+
+  it("parses a bounded request timeout and preserves the existing default", () => {
+    expect(parseContestantOptions(contestantArgv).requestTimeoutMs).toBe(120000);
+    expect(
+      parseContestantOptions([...contestantArgv, "--request-timeout-ms", "420000"])
+        .requestTimeoutMs,
+    ).toBe(420000);
+    for (const value of ["0", "-1", "1.5", "9007199254740992", "600001"]) {
+      expect(() =>
+        parseContestantOptions([...contestantArgv, "--request-timeout-ms", value]),
+      ).toThrow(/--request-timeout-ms/);
+    }
+  });
+
+  it("parses judge request timeouts with the shared default and upper bound", () => {
+    const argv = [
+      "--model",
+      "google/gemini-3.1-flash-lite",
+      "--max-completion-tokens",
+      "4000",
+      "--workspace-path",
+      "/tmp/work",
+      "--prompt-path",
+      "/tmp/prompt.md",
+      "--candidate-screenshot-path",
+      "/tmp/candidate.png",
+      "--contact-sheet-path",
+      "/tmp/cohort.png",
+      "--sanitised-css-path",
+      "/tmp/candidate.css",
+      "--judgment-path",
+      "/tmp/same.json",
+      "--judgment-summary-path",
+      "/tmp/same.json",
+      "--awards-path",
+      "/tmp/same.json",
+      "--execution-metadata-path",
+      "/tmp/metadata.json",
+      "--usage-path",
+      "/tmp/usage.json",
+    ];
+    expect(parseJudgeOptions(argv).requestTimeoutMs).toBe(120000);
+    expect(
+      parseJudgeOptions([...argv, "--request-timeout-ms", "180000"]).requestTimeoutMs,
+    ).toBe(180000);
+    expect(() =>
+      parseJudgeOptions([...argv, "--request-timeout-ms", "600001"]),
+    ).toThrow(/--request-timeout-ms/);
+  });
+
+  it("forwards contestant and judge request timeouts to the aborting fetch", async () => {
+    const { paths } = await fixture();
+    const timeouts: number[] = [];
+    const fetchImpl: typeof fetch = async (_input, init): Promise<Response> => {
+      const signal = init?.signal;
+      if (!(signal instanceof AbortSignal)) throw new Error("missing abort signal");
+      timeouts.push(1);
+      return await new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener(
+          "abort",
+          () => reject(new Error("stub observed abort")),
+          { once: true },
+        );
+      });
+    };
+    const contestantDirectory = paths["prompt.md"]!.replace(/prompt\.md$/u, "");
+    await expect(
+      runContestant(
+        {
+          model: "qwen/qwen3-coder-next",
+          maxCompletionTokens: 256,
+          requestTimeoutMs: 5,
+          workspacePath: contestantDirectory,
+          promptPath: paths["prompt.md"]!,
+          challengePath: paths["challenge.html"]!,
+          starterCssPath: paths["starter.css"]!,
+          submissionPath: join(contestantDirectory, "submission.css"),
+          executionMetadataPath: join(contestantDirectory, "contestant-metadata.json"),
+          usagePath: join(contestantDirectory, "contestant-usage.json"),
+        },
+        { fetchImpl, apiKey: "offline-test-key" },
+      ),
+    ).rejects.toThrow("OpenRouter request timed out");
+
+    const input = judgeOptions(paths, "score");
+    await expect(
+      runJudge(
+        { ...input, requestTimeoutMs: 5 },
+        {
+          fetchImpl,
+          apiKey: "offline-test-key",
+        },
+      ),
+    ).rejects.toThrow("OpenRouter request timed out");
+    expect(timeouts).toHaveLength(2);
   });
 
   it("sends one bounded non-streaming contestant request with real source text, no credential leakage, and captures usage", async () => {
