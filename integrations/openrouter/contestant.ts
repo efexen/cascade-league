@@ -29,6 +29,19 @@ export interface ContestantOptions {
   readonly usagePath: string;
 }
 
+function normalizeContestantCss(content: string): string {
+  const fenced = content.match(/^```css\r?\n([\s\S]*\r?\n)```(?:\r?\n)?$/iu);
+  const css = fenced?.[1] ?? content;
+  if (
+    (!fenced && /```/u.test(content)) ||
+    (fenced && /```/u.test(css)) ||
+    Buffer.byteLength(css, "utf8") > MAX_CSS_BYTES
+  ) {
+    throw new Error("OpenRouter response is not bounded plain CSS");
+  }
+  return fenced ? css : `${css}\n`;
+}
+
 export function parseContestantOptions(argv: readonly string[]): ContestantOptions {
   const values = parseOptions(argv, [
     "--model",
@@ -96,12 +109,8 @@ export async function runContestant(
       ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
     },
   );
-  if (
-    Buffer.byteLength(response.content, "utf8") > MAX_CSS_BYTES ||
-    /```/u.test(response.content)
-  )
-    throw new Error("OpenRouter response is not bounded plain CSS");
-  await writeTextAtomically(input.submissionPath, `${response.content}\n`);
+  const css = normalizeContestantCss(response.content);
+  await writeTextAtomically(input.submissionPath, css);
   await assertRegularFile(input.submissionPath, "submission.css");
   await writeBoundedJson(input.executionMetadataPath, metadata(response));
   await writeUsage(input.usagePath, response.usage);

@@ -17,9 +17,12 @@ timeout is a failed one-shot attempt, not permission to retry; OpenRouter may
 still bill work completed after the client aborts.
 It rejects HTTP errors,
 malformed or oversized responses, missing/empty content, non-normal finish
-reasons (including token truncation), invalid judge JSON, and CSS wrapped in
-Markdown. Inputs, image bytes, request time, and response bytes are bounded.
-Only a loopback HTTP endpoint can be injected by tests; CLI options always use
+reasons (including token truncation), invalid judge JSON, and contestant prose
+or multiple Markdown blocks. The contestant accepts plain CSS or exactly one
+whole-response `css`-labelled fence, which it unwraps before checking CSS bytes;
+other fences, embedded backticks, and extra text remain invalid. Inputs, image
+bytes, request time, and response bytes are bounded. Only a loopback HTTP
+endpoint can be injected by tests; CLI options always use
 `https://openrouter.ai/api/v1/chat/completions`.
 
 `OPENROUTER_API_KEY` is read directly from the allowlisted environment. It is

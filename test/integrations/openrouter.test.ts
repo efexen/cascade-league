@@ -8,6 +8,7 @@ import {
   parseContestantOptions,
   runContestant,
 } from "../../integrations/openrouter/contestant.js";
+import { MAX_CSS_BYTES } from "../../integrations/openrouter/shared.js";
 import {
   inferJudgeOperation,
   parseJudgeOptions,
@@ -329,6 +330,112 @@ describe("OpenRouter adapter contract", () => {
     expect(await readFile(join(directory, "metadata.json"), "utf8")).not.toContain(
       "dummy-local-test-token",
     );
+  });
+
+  it("unwraps one complete CSS fence and writes only its interior", async () => {
+    const { paths } = await fixture();
+    const cssPrefix = "a{color:red;} ";
+    const css = `${cssPrefix}${" ".repeat(12273 - cssPrefix.length)}\n`;
+    const content = `\`\`\`css\n${css}\`\`\``;
+    expect(Buffer.byteLength(content, "utf8")).toBe(12284);
+    const submissionPath = join(
+      paths["prompt.md"]!.replace(/prompt\.md$/u, ""),
+      "submission.css",
+    );
+    await withServer(
+      async (_request, response) => complete(response, completion(content)),
+      async (endpoint) =>
+        runContestant(
+          {
+            model: "qwen/qwen3-coder-next",
+            maxCompletionTokens: 256,
+            workspacePath: paths["prompt.md"]!,
+            promptPath: paths["prompt.md"]!,
+            challengePath: paths["challenge.html"]!,
+            starterCssPath: paths["starter.css"]!,
+            submissionPath,
+            executionMetadataPath: join(
+              paths["prompt.md"]!.replace(/prompt\.md$/u, ""),
+              "metadata.json",
+            ),
+            usagePath: join(
+              paths["prompt.md"]!.replace(/prompt\.md$/u, ""),
+              "usage.json",
+            ),
+          },
+          { endpoint, apiKey: "offline-test-key" },
+        ),
+    );
+    expect(await readFile(submissionPath, "utf8")).toBe(css);
+  });
+
+  it.each([
+    ["prefatory prose", "Here is the CSS:\n```css\na{}\n```"],
+    ["trailing prose", "```css\na{}\n```\nDone."],
+    ["multiple fences", "```css\na{}\n```\n```css\nb{}\n```"],
+    ["nested backticks", "```css\na{content: ` ``` `;}\n```"],
+    ["arbitrary Markdown language", "```scss\na{}\n```"],
+    ["unterminated fence", "```css\na{}"],
+  ] as const)("rejects fenced contestant output with %s", async (_label, content) => {
+    const { paths } = await fixture();
+    const directory = paths["prompt.md"]!.replace(/prompt\.md$/u, "");
+    const submissionPath = join(directory, "submission.css");
+    await withServer(
+      async (_request, response) => complete(response, completion(content)),
+      async (endpoint) =>
+        expect(
+          runContestant(
+            {
+              model: "qwen/qwen3-coder-next",
+              maxCompletionTokens: 256,
+              workspacePath: directory,
+              promptPath: paths["prompt.md"]!,
+              challengePath: paths["challenge.html"]!,
+              starterCssPath: paths["starter.css"]!,
+              submissionPath,
+              executionMetadataPath: join(directory, "metadata.json"),
+              usagePath: join(directory, "usage.json"),
+            },
+            { endpoint, apiKey: "offline-test-key" },
+          ),
+        ).rejects.toThrow(/not bounded plain CSS/),
+    );
+  });
+
+  it("accepts case-insensitive CSS fences and enforces the unwrapped CSS byte boundary", async () => {
+    const { paths } = await fixture();
+    const directory = paths["prompt.md"]!.replace(/prompt\.md$/u, "");
+    const input = {
+      model: "qwen/qwen3-coder-next",
+      maxCompletionTokens: 256,
+      workspacePath: directory,
+      promptPath: paths["prompt.md"]!,
+      challengePath: paths["challenge.html"]!,
+      starterCssPath: paths["starter.css"]!,
+      submissionPath: join(directory, "submission.css"),
+      executionMetadataPath: join(directory, "metadata.json"),
+      usagePath: join(directory, "usage.json"),
+    };
+    const cssAtLimit = `a{${"x".repeat(MAX_CSS_BYTES - 4)}}\n`;
+    expect(Buffer.byteLength(cssAtLimit, "utf8")).toBe(MAX_CSS_BYTES);
+    await withServer(
+      async (_request, response) =>
+        complete(response, completion(`\`\`\`CSS\n${cssAtLimit}\`\`\``)),
+      async (endpoint) =>
+        runContestant(input, { endpoint, apiKey: "offline-test-key" }),
+    );
+    expect(await readFile(input.submissionPath, "utf8")).toBe(cssAtLimit);
+
+    const tooLarge = `${cssAtLimit}x`;
+    await withServer(
+      async (_request, response) =>
+        complete(response, completion(`\`\`\`css\n${tooLarge}\n\`\`\``)),
+      async (endpoint) =>
+        expect(
+          runContestant(input, { endpoint, apiKey: "offline-test-key" }),
+        ).rejects.toThrow(/not bounded plain CSS/),
+    );
+    expect(await readFile(input.submissionPath, "utf8")).toBe(cssAtLimit);
   });
 
   it("attaches score prompt and CSS before candidate then cohort base64 PNGs", async () => {
