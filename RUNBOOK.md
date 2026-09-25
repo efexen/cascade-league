@@ -142,6 +142,25 @@ gallery by itself. Prefer `run-generation` for a complete cycle.
 - A one-shot declaration, a version label, and preflight success are claims to
   inspect, not proofs of sandboxing, entitlement, or experimental equivalence.
 
+### OpenRouter direct HTTP profile (season 004)
+
+`config/profiles/season004.local/` is a private six-contestant/two-judge
+profile for the bounded provider integration wave. It uses the direct OpenRouter
+Chat Completions API adapters, with an `openrouter` resource lane limited to one
+concurrent task and a two-second start interval. The OpenRouter contestants and
+Gemini judge require `OPENROUTER_API_KEY` in the launching environment; the
+profile contains only the variable name. See
+[OpenRouter adapter and local key setup](integrations/openrouter/README.md).
+
+Without an account, use the benign `offline-preflight-placeholder` value only
+for `garden verify` and `plan-generation`. Those commands do not invoke provider
+adapters or make HTTP calls. They cannot validate authentication, credits,
+model entitlement, image support, or likely spend. Do not create a generation
+or run a smoke request before Ville explicitly approves a quoted cap. No
+OpenRouter account, key, credit, or model entitlement is assumed by this
+profile. The planned count is 20 harness tasks; model-side request counts and
+costs remain unknown.
+
 ## 4. Seasons versus generations
 
 | Term             | Meaning in this implementation                                                             |

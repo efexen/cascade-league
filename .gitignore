@@ -4,6 +4,7 @@ test-results/
 coverage/
 generations/
 config/profiles/real.local/
+config/profiles/season004.local/
 .DS_Store
 *.log
 .env

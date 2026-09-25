@@ -18,6 +18,8 @@ pwd -P
 
 Use only a model identifier that your own authenticated account is entitled to use. Obtain it from that CLI's account/configuration or provider documentation. The uppercase `YOUR_…` values below are placeholders, not model recommendations or known model IDs. Replace every one before preflight. Cascade League cannot discover or grant model entitlement, and a provider may treat a named model as a moving alias rather than an immutable checkpoint.
 
+The private `season004.local` profile uses the direct OpenRouter adapters for two contestants and one visual judge. Follow [the OpenRouter local credential setup](../integrations/openrouter/README.md) to keep `OPENROUTER_API_KEY` in a local secret store or silent shell input. Preflight success does not validate account credit or entitlement; the OpenRouter account and key are not assumed to exist.
+
 ## Complete two-contestant example
 
 This example uses the checked-in Codex and OpenCode wrappers. Paste it into `config/profiles/real.local/contestants.yaml`, then replace all `/ABSOLUTE/…` and `YOUR_…` values. `schemaVersion: 2` is required for the scheduling fields shown here.
