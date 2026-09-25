@@ -14,6 +14,7 @@ If current requirements conflict or a requirement cannot be satisfied, stop and 
 - Do not add React, Next.js, Astro, a database, Docker, a web framework, client-side JavaScript, remote page resources, or other Phase 1 non-goals.
 - Never use paid model calls in tests. Fixture adapters must exercise the full pipeline deterministically and offline after dependencies/browser installation.
 - Preserve immutable artifacts, anonymous judging boundaries, one-shot contestant behavior, argv-array command execution with `shell: false`, explicit environment allowlists, and model-output escaping.
+- Put CLI entries that share local state in the same resource group, and allowlist `PATH` for commands launched through `/usr/bin/env node`.
 
 ### Runtime override
 

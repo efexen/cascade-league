@@ -128,7 +128,53 @@ describe("named configuration profiles", () => {
         expect(contestant.harness.name).toBe("OpenCode CLI");
         expect(contestant.harness.version).toBe("1.18.25");
         expect(contestant.execution?.oneShotEnforcement).toBe("prompt_only");
-        expect(contestant.execution?.resourceGroup).toBe("openrouter");
+        expect(contestant.execution?.resourceGroup).toBe("opencode-go");
+      }
+      for (const entry of [
+        ...profile.contestants.contestants,
+        ...profile.judges.judges,
+      ].filter(
+        ({ harness }) =>
+          harness.adapter === "command" &&
+          harness.command.argv.some((argument) =>
+            argument.startsWith(join(repositoryRoot, "integrations/opencode/")),
+          ),
+      )) {
+        expect(entry.execution?.resourceGroup).toBe("opencode-go");
+      }
+      expect(profile.contestants.resourceGroups?.["opencode-go"]).toEqual({
+        maximumConcurrency: 1,
+        minimumStartIntervalMs: 2000,
+      });
+      expect(profile.judges.resourceGroups?.["opencode-go"]).toEqual({
+        maximumConcurrency: 1,
+        minimumStartIntervalMs: 2000,
+      });
+
+      const gemini = profile.judges.judges.find(
+        ({ id }) => id === "openrouter-gemini-31-flash-lite",
+      );
+      expect(gemini?.execution?.resourceGroup).toBe("openrouter");
+      expect(gemini?.harness.adapter).toBe("command");
+      if (gemini?.harness.adapter !== "command")
+        throw new Error("expected command adapter");
+      expect(gemini.harness.command.argv.slice(0, 2)).toEqual(["/usr/bin/env", "node"]);
+      expect(gemini.harness.command.environmentAllowlist).toContain("PATH");
+      expect(gemini.harness.command.environmentAllowlist).toContain(
+        "OPENROUTER_API_KEY",
+      );
+
+      for (const entry of [
+        ...profile.contestants.contestants,
+        ...profile.judges.judges,
+      ]) {
+        if (entry.harness.adapter !== "command") continue;
+        if (
+          entry.harness.command.argv[0] === "/usr/bin/env" &&
+          entry.harness.command.argv[1] === "node"
+        ) {
+          expect(entry.harness.command.environmentAllowlist).toContain("PATH");
+        }
       }
       expect(
         contestants.find(({ id }) => id === "codex-luna-medium")?.designGuidance,
