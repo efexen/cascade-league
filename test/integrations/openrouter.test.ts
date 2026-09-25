@@ -429,6 +429,62 @@ describe("OpenRouter adapter contract", () => {
     }
   });
 
+  it("reports bounded diagnostics for a non-stop completion without leaking its content", async () => {
+    for (const [reason, expectedReason] of [
+      ["length", "finish_reason=length"],
+      ["length\nINJECTED", "finish_reason=[invalid]"],
+    ] as const) {
+      let calls = 0;
+      await withServer(
+        async (_request, response) => {
+          calls += 1;
+          complete(
+            response,
+            completion("private partial output", {
+              id: "req-diagnostic-123",
+              choices: [
+                {
+                  finish_reason: reason,
+                  message: { content: "private partial output" },
+                },
+              ],
+              usage: {
+                completion_tokens: 8192,
+                completion_tokens_details: { reasoning_tokens: 7800 },
+              },
+            }),
+          );
+        },
+        async (endpoint) => {
+          let failure = "";
+          try {
+            await requestCompletion(
+              {
+                apiKey: "private-key",
+                model: "minimax/minimax-m2.7",
+                maxCompletionTokens: 8192,
+                content: "prompt",
+                timeoutMs: 1000,
+              },
+              { endpoint },
+            );
+          } catch (error) {
+            failure = error instanceof Error ? error.message : String(error);
+          }
+          expect(failure).toContain("OpenRouter completion was not finished normally");
+          expect(failure).toContain(expectedReason);
+          expect(failure).toContain("completion_tokens=8192");
+          expect(failure).toContain("reasoning_tokens=7800");
+          expect(failure).toContain('request_id="req-diagnostic-123"');
+          expect(failure).not.toContain("private partial output");
+          expect(failure).not.toContain("INJECTED");
+          expect(failure).not.toContain("private-key");
+        },
+      );
+      expect(calls).toBe(1);
+    }
+  });
+
   it("times out without exposing the key and rejects remote injected endpoints", async () => {
     let calls = 0;
     await withServer(

@@ -164,6 +164,28 @@ function usageFrom(value: unknown): OpenRouterUsage {
   };
 }
 
+function diagnosticFinishReason(value: unknown): string {
+  const knownReasons = new Set(["stop", "length", "content_filter", "tool_calls"]);
+  if (typeof value !== "string") return "[invalid]";
+  if (knownReasons.has(value)) return value;
+  return /^[A-Za-z0-9_.-]{1,64}$/.test(value) ? value : "[invalid]";
+}
+
+function nonStopDiagnostic(
+  root: Record<string, unknown>,
+  choice: Record<string, unknown>,
+): string {
+  const usage = usageFrom(root.usage);
+  const details = [
+    `finish_reason=${diagnosticFinishReason(choice.finish_reason)}`,
+    `completion_tokens=${usage.outputTokens ?? "unknown"}`,
+    `reasoning_tokens=${usage.reasoningTokens ?? "unknown"}`,
+  ];
+  if (typeof root.id === "string" && root.id.length <= 256)
+    details.push(`request_id=${JSON.stringify(root.id)}`);
+  return details.join(", ");
+}
+
 export async function requestCompletion(
   input: {
     readonly apiKey: string;
@@ -253,7 +275,9 @@ export async function requestCompletion(
     }
     const choice = choices[0] as Record<string, unknown>;
     if (choice.finish_reason !== "stop")
-      throw new Error("OpenRouter completion was not finished normally");
+      throw new Error(
+        `OpenRouter completion was not finished normally (${nonStopDiagnostic(root, choice)})`,
+      );
     const message = choice.message;
     if (
       typeof message !== "object" ||
