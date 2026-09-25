@@ -57,6 +57,13 @@ describe("static publication export", () => {
       generationPath: generation.generationPath,
       generatedAt: timestamp,
     });
+    const sourceGalleryIndex = await readFile(
+      join(generation.generationPath, "public/index.html"),
+      "utf8",
+    );
+    expect(sourceGalleryIndex).toContain(
+      '<meta name="viewport" content="width=1280, initial-scale=1">',
+    );
     const sourceHash = await hashTree(generation.generationPath);
 
     const first = await exportGenerationToStaticSite({
@@ -73,6 +80,12 @@ describe("static publication export", () => {
       join(first.publicPath, "designs/fixture-editorial/view.html"),
       "utf8",
     );
+    const publishedRawDesign = await readFile(
+      join(first.publicPath, "designs/fixture-editorial/index.html"),
+    );
+    const publishedScreenshot = await readFile(
+      join(first.publicPath, "screenshots/entry-001.png"),
+    );
     const catalog = JSON.parse(
       await readFile(join(siteRoot, "catalog.json"), "utf8"),
     ) as {
@@ -80,6 +93,28 @@ describe("static publication export", () => {
     };
 
     expect(first).toMatchObject({ seasonId: "0001", generationId: "0001" });
+    expect(generationIndex).toContain(
+      '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    );
+    expect(generationIndex).toContain(
+      '<nav class="cascade-publication-nav" aria-label="Gallery navigation">',
+    );
+    expect(generationIndex).toContain(
+      '<link rel="stylesheet" href="gallery-navigation.css">',
+    );
+    expect(generationIndex).toContain('href="../../../index.html">All seasons</a>');
+    expect(generationIndex).toContain("Season 001 · Generation 0001");
+    expect(generationIndex).toContain("<summary>Browse contestants</summary>");
+    expect(generationIndex).toContain('href="designs/fixture-editorial/view.html"');
+    expect(generationIndex).toContain('href="designs/fixture-geometric/view.html"');
+    expect(generationIndex).toContain('href="designs/fixture-generic/view.html"');
+    expect(generationIndex).not.toContain("Contestant design guidance");
+    expect(generationIndex.indexOf('class="cascade-publication-nav"')).toBeLessThan(
+      generationIndex.indexOf('<div class="page-shell">'),
+    );
+    await expect(
+      readFile(join(first.publicPath, "gallery-navigation.css"), "utf8"),
+    ).resolves.toContain(".cascade-publication-nav");
     expect(generationIndex).toContain('href="designs/fixture-editorial/view.html"');
     expect(plainViewer).not.toContain("Contestant design guidance");
     await expect(
@@ -111,6 +146,12 @@ describe("static publication export", () => {
     });
     expect(await hashTree(siteRoot)).toBe(firstHash);
     expect(await hashTree(generation.generationPath)).toBe(sourceHash);
+    await expect(
+      readFile(join(first.publicPath, "designs/fixture-editorial/index.html")),
+    ).resolves.toEqual(publishedRawDesign);
+    await expect(
+      readFile(join(first.publicPath, "screenshots/entry-001.png")),
+    ).resolves.toEqual(publishedScreenshot);
   }, 30000);
 
   it("exports post-judging guidance with a safe viewer navigation path", async () => {
@@ -135,11 +176,15 @@ describe("static publication export", () => {
       siteRoot,
     });
     const guidance = await readFile(join(exported.publicPath, "guidance.html"), "utf8");
+    const gallery = await readFile(join(exported.publicPath, "index.html"), "utf8");
     const viewer = await readFile(
       join(exported.publicPath, "designs/luna-guided/view.html"),
       "utf8",
     );
     expect(viewer).toContain('href="../../guidance.html"');
+    expect(gallery).toContain(
+      '<a class="cascade-publication-nav__guidance" href="guidance.html">Contestant design guidance</a>',
+    );
     expect(guidance).toContain("Guidance provided after judging");
     expect(guidance).toContain("Plain · no additional design guidance");
     expect(guidance).toContain("Treat the page as a system of information");

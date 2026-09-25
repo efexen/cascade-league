@@ -11,6 +11,7 @@ const GENERATION_FILES = new Set([
   "champion.css",
   "designs",
   "fonts",
+  "gallery-navigation.css",
   "gallery-layout.css",
   "gallery-screenshot.png",
   "gallery-viewport.png",
