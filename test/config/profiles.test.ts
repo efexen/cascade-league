@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { cp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -89,6 +90,55 @@ async function repositoryWithProfile(
 }
 
 describe("named configuration profiles", () => {
+  it.skipIf(
+    !existsSync(
+      join(repositoryRoot, "config/profiles/season004.local/contestants.yaml"),
+    ),
+  )(
+    "audits the private Season 004 six-person roster and OpenRouter CLI contestants when present",
+    async () => {
+      const profile = await resolveProfile(repositoryRoot, "season004.local");
+      const contestants = profile.contestants.contestants;
+      expect(contestants.map(({ id }) => id)).toEqual([
+        "codex-terra-low",
+        "codex-luna-medium",
+        "codex-luna-medium-guided",
+        "opencode-go-mimo-v26-flash",
+        "openrouter-qwen3-coder-next",
+        "openrouter-minimax-m27",
+      ]);
+      for (const [id, model] of [
+        ["openrouter-qwen3-coder-next", "openrouter/qwen/qwen3-coder-next"],
+        ["openrouter-minimax-m27", "openrouter/minimax/minimax-m2.7"],
+      ]) {
+        const contestant = contestants.find((entry) => entry.id === id);
+        expect(contestant?.harness.adapter).toBe("command");
+        if (contestant?.harness.adapter !== "command")
+          throw new Error("expected command adapter");
+        expect(contestant.harness.command.argv).toContain(
+          join(repositoryRoot, "integrations/opencode/contestant.ts"),
+        );
+        expect(contestant.harness.command.argv).toContain("/opt/homebrew/bin/opencode");
+        expect(contestant.harness.command.argv).toContain(model);
+        expect(contestant.harness.command.environmentAllowlist).toEqual([
+          "HOME",
+          "PATH",
+          "OPENROUTER_API_KEY",
+        ]);
+        expect(contestant.harness.name).toBe("OpenCode CLI");
+        expect(contestant.harness.version).toBe("1.18.25");
+        expect(contestant.execution?.oneShotEnforcement).toBe("prompt_only");
+        expect(contestant.execution?.resourceGroup).toBe("openrouter");
+      }
+      expect(
+        contestants.find(({ id }) => id === "codex-luna-medium")?.designGuidance,
+      ).toBeUndefined();
+      expect(
+        contestants.find(({ id }) => id === "codex-luna-medium-guided")?.designGuidance,
+      ).toBe("challenge/season-004/guidance/luna-design.md");
+    },
+  );
+
   it("resolves the checked-in fixture profile from the repository", async () => {
     const profile = await resolveProfile(repositoryRoot, "fixture");
     expect(profile.profileId).toBe("fixture");

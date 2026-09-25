@@ -90,12 +90,17 @@ export async function writeBoundedJson(
   await writeTextAtomically(path, text);
 }
 
-function childEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+function childEnvironment(
+  source: NodeJS.ProcessEnv = process.env,
+  includeOpenRouterKey = false,
+): NodeJS.ProcessEnv {
   return Object.fromEntries(
-    ["HOME", "PATH"].flatMap((name) => {
-      const value = source[name];
-      return value === undefined ? [] : [[name, value]];
-    }),
+    ["HOME", "PATH", ...(includeOpenRouterKey ? ["OPENROUTER_API_KEY"] : [])].flatMap(
+      (name) => {
+        const value = source[name];
+        return value === undefined ? [] : [[name, value]];
+      },
+    ),
   );
 }
 
@@ -138,6 +143,7 @@ export interface OpenCodeInvocation {
   readonly argv: readonly string[];
   readonly cwd: string;
   readonly prompt: string;
+  readonly forwardOpenRouterKey?: boolean;
 }
 
 export async function invokeOpenCode(input: OpenCodeInvocation): Promise<string> {
@@ -148,7 +154,7 @@ export async function invokeOpenCode(input: OpenCodeInvocation): Promise<string>
     try {
       child = spawn(input.executable, [...input.argv], {
         cwd: input.cwd,
-        env: childEnvironment(),
+        env: childEnvironment(process.env, input.forwardOpenRouterKey === true),
         shell: false,
         stdio: ["ignore", "pipe", "pipe"],
       });

@@ -20,6 +20,10 @@ const tsxLoaderPath = join(repositoryRoot, "node_modules/tsx/dist/loader.mjs");
 
 const OFFLINE_OPENCODE_STUB = String.raw`
 if (process.argv.includes("--version")) {
+  const fs = await import("node:fs/promises");
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, join } = await import("node:path");
+  await fs.writeFile(join(dirname(fileURLToPath(import.meta.url)), "version-env.json"), JSON.stringify({ openRouterKeyPresent: Boolean(process.env.OPENROUTER_API_KEY) }));
   process.stdout.write("1.18.25\n");
   process.exit(0);
 }
@@ -27,7 +31,8 @@ const args = process.argv.slice(2);
 const dirIndex = args.indexOf("--dir");
 const message = dirIndex === -1 ? "" : (args[dirIndex + 2] ?? "");
 const fs = await import("node:fs/promises");
-await fs.writeFile("opencode-argv.json", JSON.stringify({ args, home: process.env.HOME, path: process.env.PATH }));
+await fs.writeFile("opencode-argv.json", JSON.stringify({ args, home: process.env.HOME, path: process.env.PATH, openRouterKeyPresent: Boolean(process.env.OPENROUTER_API_KEY) }));
+await fs.appendFile("opencode-invocations.log", "invoked\n");
 if (message.includes("AWARDS")) {
   const awards = { schemaVersion: 1, generationId: "0001", judgeId: "opencode-judge", awards: [] };
   process.stdout.write(JSON.stringify({ type: "text", part: { text: "prefix\\n" + JSON.stringify(awards) } }) + "\n");
@@ -56,7 +61,10 @@ function wrapperCommand(entrypoint: string): string[] {
   ];
 }
 
-function contestantConfig(argv: readonly string[]) {
+function contestantConfig(
+  argv: readonly string[],
+  environmentAllowlist: readonly string[] = ["HOME", "PATH"],
+) {
   return {
     id: "opencode-contestant",
     displayName: "OpenCode Contestant",
@@ -64,7 +72,7 @@ function contestantConfig(argv: readonly string[]) {
       name: "opencode-cli",
       version: "1.18.25",
       adapter: "command" as const,
-      command: { argv: [...argv], environmentAllowlist: ["HOME", "PATH"] },
+      command: { argv: [...argv], environmentAllowlist: [...environmentAllowlist] },
     },
     model: {
       provider: "openai",
@@ -111,6 +119,96 @@ describe("OpenCode CLI integration contracts", () => {
     })}\n`;
 
     expect(JSON.parse(extractLastJsonValue(output))).toEqual(judgment);
+  });
+
+  it("forwards OpenRouter credentials only to OpenRouter model runs, never to version probes", async () => {
+    const root = await createTestTempRoot("cascade-league-opencode-openrouter-");
+    const executable = await writeStub(root);
+    const workspace = join(root, "workspace");
+    await mkdir(workspace, { recursive: true });
+    const challengePath = join(workspace, "challenge.html");
+    const starterCssPath = join(workspace, "starter.css");
+    const promptPath = join(workspace, "prompt.md");
+    await writeFile(challengePath, "<main>challenge</main>\n", "utf8");
+    await writeFile(starterCssPath, ":root {}\n", "utf8");
+    await writeFile(promptPath, "CONTESTANT PROMPT\n", "utf8");
+
+    const invoke = async (model: string, suffix: string) => {
+      const runWorkspace = join(root, suffix);
+      await mkdir(runWorkspace, { recursive: true });
+      const outputPath = join(runWorkspace, "submission.css");
+      const argv = [
+        ...wrapperCommand("contestant.ts"),
+        "--opencode-path",
+        executable,
+        "--opencode-version",
+        "1.18.25",
+        "--model",
+        model,
+        "--workspace-path",
+        "{workspacePath}",
+        "--challenge-path",
+        "{challengePath}",
+        "--starter-css-path",
+        "{starterCssPath}",
+        "--prompt-path",
+        "{promptPath}",
+        "--submission-path",
+        "{submissionPath}",
+        "--execution-metadata-path",
+        "{executionMetadataOutputPath}",
+      ];
+      const input: ContestantRunInput = {
+        generationId: "0001",
+        contestantId: "opencode-contestant",
+        anonymousCandidateId: "candidate-abcd",
+        contestant: contestantConfig(argv, ["HOME", "PATH", "OPENROUTER_API_KEY"]),
+        workspacePath: runWorkspace,
+        challengePath,
+        starterCssPath,
+        promptPath,
+        submissionPath: outputPath,
+        usageOutputPath: join(runWorkspace, "usage.json"),
+        executionMetadataOutputPath: join(runWorkspace, "execution-metadata.json"),
+        stdoutLogPath: join(runWorkspace, "stdout.log"),
+        stderrLogPath: join(runWorkspace, "stderr.log"),
+        timeoutMs: 10_000,
+        maximumTotalTokens: 30_000,
+      };
+      const result = await new CommandContestantAdapter({
+        environment: {
+          HOME: root,
+          PATH: process.env.PATH ?? "/usr/bin:/bin",
+          OPENROUTER_API_KEY: "synthetic-test-key-do-not-log",
+        },
+      }).run(input);
+      expect(result.status).toBe("succeeded");
+      expect(await readFile(outputPath, "utf8")).toBe("body { color: red; }\n");
+      const record = JSON.parse(
+        await readFile(join(runWorkspace, "opencode-argv.json"), "utf8"),
+      ) as { args: string[]; openRouterKeyPresent: boolean };
+      expect(record.args.slice(0, 5)).toEqual([
+        "run",
+        "--format",
+        "json",
+        "--model",
+        model,
+      ]);
+      expect(record.openRouterKeyPresent).toBe(model.startsWith("openrouter/"));
+      expect(
+        (await readFile(join(runWorkspace, "opencode-invocations.log"), "utf8"))
+          .trim()
+          .split("\n"),
+      ).toHaveLength(1);
+      expect(
+        JSON.parse(await readFile(join(root, "version-env.json"), "utf8")),
+      ).toEqual({
+        openRouterKeyPresent: false,
+      });
+    };
+
+    await invoke("openrouter/qwen/qwen3-coder-next", "openrouter-run");
+    await invoke("opencode-go/mimo-v2.6-flash", "go-run");
   });
 
   it("uses one-shot JSONL run protocol for contestant and anonymous judge operations", async () => {

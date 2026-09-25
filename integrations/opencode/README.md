@@ -56,9 +56,23 @@ PNG. Score and award operations are inferred from the generic path aliases:
 score has all three output aliases equal, while awards has `judgmentPath` and
 `awardsPath` equal and a distinct `judgmentSummaryPath`.
 
-Only `HOME` and `PATH` are forwarded inside the wrapper. `HOME` lets OpenCode
-resolve the user's local auth/configuration; credential values are never copied
-into the repository or printed. The executable must be absolute in the profile.
+The wrapper normally forwards only `HOME` and `PATH`. For a contestant whose
+model ID starts with the exact `openrouter/` prefix, it also forwards
+`OPENROUTER_API_KEY` to the `opencode run` child if the value is present and
+non-empty. The version probe never receives that key, and OpenCode Go or other
+non-OpenRouter model runs never receive it, even when the wrapper process has
+it. The profile must explicitly allowlist the key for the wrapper process.
+`HOME` lets OpenCode resolve the user's local auth/configuration. The wrapper
+does not write an auth file or print credential values. The executable must be
+absolute in the profile.
+
+The private Season 004 Qwen and MiniMax entries use OpenCode CLI with the
+verified OpenRouter model IDs `openrouter/qwen/qwen3-coder-next` and
+`openrouter/minimax/minimax-m2.7`. This keeps those contestants on a real
+coding agent with filesystem and tool access. The direct OpenRouter HTTP
+adapter is a model API adapter and does not meet the contestant coding-agent
+requirement. Keep `OPENROUTER_API_KEY` in the operator's environment/secret
+store; never put its value in a profile, workspace artifact, or log.
 
 The integration records one attempt, the observed CLI version, configured model,
 and a null request ID. It does not retry. `prompt_only` remains an honest

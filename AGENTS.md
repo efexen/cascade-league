@@ -33,3 +33,14 @@ Before declaring a wave complete:
 3. Inspect generated artifacts rather than merely asserting that commands exited successfully.
 4. Report exact commands and actual outputs, deliberate deferrals, and any unresolved specification conflict.
 5. Do not commit changes; the supervising agent owns Git commits and review checkpoints.
+
+## Contestant and judge integration rules
+
+- Every contestant added to a future season must use a real CLI coding agent with
+  filesystem and tool access, such as Codex, OpenCode, or an equivalent agent.
+  An HTTP model wrapper launched by a command is not a coding agent.
+- Before readiness, audit the actual executable and wrapper paths and run an
+  offline stub smoke test. Any separately approved paid live smoke call is a
+  distinct gate; never make one implicitly during tests or verification.
+- Choose judges separately from contestants. Never change a judge or otherwise
+  retrospectively mutate an immutable run to match a later contestant setup.

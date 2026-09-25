@@ -18,7 +18,7 @@ pwd -P
 
 Use only a model identifier that your own authenticated account is entitled to use. Obtain it from that CLI's account/configuration or provider documentation. The uppercase `YOUR_…` values below are placeholders, not model recommendations or known model IDs. Replace every one before preflight. Cascade League cannot discover or grant model entitlement, and a provider may treat a named model as a moving alias rather than an immutable checkpoint.
 
-The private `season004.local` profile uses the direct OpenRouter adapters for two contestants and one visual judge. Follow [the OpenRouter local credential setup](../integrations/openrouter/README.md) to keep `OPENROUTER_API_KEY` in a local secret store or silent shell input. Preflight success does not validate account credit or entitlement; the OpenRouter account and key are not assumed to exist.
+Every contestant must run through a real CLI coding agent with filesystem and tool access (Codex, OpenCode, or an equivalent). A command that only wraps an HTTP model API is not a coding agent. The private `season004.local` Qwen and MiniMax contestants use OpenCode CLI with OpenRouter model IDs; see the [OpenCode integration](../integrations/opencode/README.md) for provider-scoped credential forwarding. Keep `OPENROUTER_API_KEY` in the operator's environment or secret store and explicitly allowlist its name for those two entries. The profile contains no key value. A separate visual judge can use a direct model API adapter; judges are selected independently and do not retrospectively alter immutable runs. Preflight does not validate account credit or model entitlement.
 
 ## Complete two-contestant example
 
@@ -138,7 +138,7 @@ contestants:
 
 `id` values must be unique lowercase hyphenated slugs and stay stable within a season. Display names are public. Treat a changed harness, model, reasoning setting, material configuration, or budget as a new identity and normally a new season.
 
-The Codex wrapper reads OAuth state from `HOME` or an explicitly allowlisted `CODEX_HOME`; it deliberately does not forward `CODEX_API_KEY`. The OpenCode wrapper forwards only `HOME` and `PATH` to its child and expects the user's existing OpenCode authentication/configuration. These wrappers are therefore for already authenticated CLIs, not raw API-key setup.
+The Codex wrapper reads OAuth state from `HOME` or an explicitly allowlisted `CODEX_HOME`; it deliberately does not forward `CODEX_API_KEY`. The OpenCode wrapper normally forwards only `HOME` and `PATH`. For contestant models with the exact `openrouter/` prefix, it additionally forwards `OPENROUTER_API_KEY` only to the model invocation; version checks and OpenCode Go runs do not receive it. These wrappers launch coding agents rather than direct model API calls.
 
 ## Complete judge example
 

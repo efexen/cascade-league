@@ -61,6 +61,10 @@ export function parseContestantOptions(argv: readonly string[]): ContestantOptio
 }
 
 export async function runContestant(input: ContestantOptions): Promise<void> {
+  const usesOpenRouter = input.model.startsWith("openrouter/");
+  if (usesOpenRouter && !process.env.OPENROUTER_API_KEY?.trim()) {
+    throw new Error("OpenRouter model requires OPENROUTER_API_KEY");
+  }
   await readBoundedText(input.challengePath, "challenge HTML", MAX_PROMPT_BYTES);
   await readBoundedText(input.starterCssPath, "starter CSS", MAX_CSS_BYTES);
   const prompt = await readBoundedText(
@@ -108,6 +112,7 @@ export async function runContestant(input: ContestantOptions): Promise<void> {
     argv,
     cwd: input.workspacePath,
     prompt: argv.at(-1)!,
+    forwardOpenRouterKey: usesOpenRouter,
   });
   await assertRegularFile(input.submissionPath, "submission.css");
 }
