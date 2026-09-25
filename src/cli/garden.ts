@@ -11,6 +11,7 @@ import { buildGallery } from "../gallery/index.js";
 import { runGeneration } from "../orchestration/generation.js";
 import { runWaveB } from "../orchestration/wave-b.js";
 import { exportGenerationToStaticSite } from "../publishing/static-site.js";
+import { backfillPublishedViewers } from "../publishing/backfill-viewers.js";
 import { startLoopbackStaticServer } from "../rendering/index.js";
 import { summarizeGeneration } from "../summarize/index.js";
 import { formatRunPlan, planGeneration } from "./planning.js";
@@ -92,6 +93,31 @@ program
     }
     if (!report.ok) {
       process.exitCode = 1;
+    }
+  });
+
+program
+  .command("backfill-viewers")
+  .description("Preview or add design viewers to an existing published season")
+  .requiredOption(
+    "--site-path <path>",
+    "published static-site checkout or disposable copy",
+  )
+  .requiredOption("--season <season>", "four-digit published season ID")
+  .option("--write", "apply the migration (without this flag, only preview)")
+  .action(async (options: { sitePath: string; season: string; write?: boolean }) => {
+    const result = await backfillPublishedViewers({
+      sitePath: resolve(options.sitePath),
+      seasonId: options.season,
+      dryRun: options.write !== true,
+    });
+    console.log(
+      `${result.dryRun ? "Preview" : "Applied"}: ${String(result.generations)} generations, ${String(result.viewers)} viewers.`,
+    );
+    if (result.changedFiles.length === 0) {
+      console.log("No changes required.");
+    } else {
+      for (const path of result.changedFiles) console.log(path);
     }
   });
 

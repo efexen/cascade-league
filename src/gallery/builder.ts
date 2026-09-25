@@ -172,16 +172,16 @@ function escapeHtml(value: string): string {
   });
 }
 
-interface ViewerEntry {
+export interface ViewerEntry {
   readonly contestantId: string;
   readonly displayName: string;
   readonly rank: number | null;
   readonly statusLabel: string;
-  readonly combinedScore: number | null;
+  readonly combinedScore?: number | null;
   readonly screenshotPath: string;
 }
 
-function renderDesignViewer(
+export function renderDesignViewer(
   seasonId: string,
   generationId: string,
   entry: ViewerEntry,
@@ -193,7 +193,7 @@ function renderDesignViewer(
   const previous = entries[index - 1];
   const next = entries[index + 1];
   const label = escapeHtml(entry.displayName);
-  const result = `Rank ${entry.rank === null ? "—" : String(entry.rank)} · ${scoreLabel(entry.combinedScore)} · ${escapeHtml(entry.statusLabel)}`;
+  const result = `Rank ${entry.rank === null ? "—" : String(entry.rank)}${entry.combinedScore === undefined ? "" : ` · ${scoreLabel(entry.combinedScore)}`} · ${escapeHtml(entry.statusLabel)}`;
   const contestantLinks = entries
     .map((candidate) => {
       const current = candidate.contestantId === entry.contestantId;
