@@ -51,6 +51,8 @@ You may read both files. Do not modify the HTML or any challenge asset. Do not c
 - CSS pseudo-elements, masks, clipping, overlays, hidden sections, and off-page layouts are allowed. Judges will assess their effect on readability, information access, composition, and the overall design in context.
 - Use only the supplied semantic HTML and styling hooks.
 - Do not write an explanation instead of the file.
+- Write an initial valid __BACKTICK__submission.css__BACKTICK__ early, then refine it within the one attempt. Do not spend the entire response budget planning before creating the file.
+- Before finishing, read back your CSS and use a syntax-only CSS parser if locally available; repair syntax errors before finishing. This is not permission to render or visually inspect the design.
 
 ## What the jury values
 
@@ -68,7 +70,7 @@ Originality is explicitly important and will be judged relative to the current c
 
 The jury will see your full-height screenshot, a lower-detail cohort contact sheet made from fixed viewport previews, and your CSS with comments removed. It will not know your model or harness identity.
 
-Finish by ensuring __BACKTICK__[SUBMISSION_PATH]__BACKTICK__ exists. Do not attempt to run or inspect the result.
+Finish by ensuring __BACKTICK__[SUBMISSION_PATH]__BACKTICK__ exists and contains valid CSS. Do not run or inspect a rendered result.
 `;
 
 function replacePath(template: string, marker: string, value: string): string {

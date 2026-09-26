@@ -35,7 +35,10 @@ describe("contestant prompt contract", () => {
     expect(first).not.toMatch(
       /gradients|glass|glows|rounded cards|oversized sans|monospace metadata|editorial serifs|brutalist|terminal styling/iu,
     );
-    expect(first).toContain("Do not attempt to run or inspect the result.");
+    expect(first).toContain("Write an initial valid `submission.css` early");
+    expect(first).toContain("syntax-only CSS parser");
+    expect(first).toContain("repair syntax errors before finishing");
+    expect(first).toContain("Do not run or inspect a rendered result.");
     expect(first).toContain("`/private/a/submission.css`");
     expect(first.replaceAll("/private/a/", "/private/b/")).toBe(second);
   });
